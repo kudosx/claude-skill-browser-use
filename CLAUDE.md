@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Claude skill for browser automation using Playwright. It provides a CLI tool (`browser.py`) for web scraping, screenshots, form filling, file downloads/uploads, Google Images scraping, and YouTube video downloading.
+This is a Claude skill for browser automation using Playwright. It provides a CLI tool (`browser.py`) for web scraping, screenshots, form filling, file downloads/uploads, Google Images scraping, YouTube video downloading, and TikTok video downloading.
 
 ## Running Commands
 
@@ -49,6 +49,17 @@ uv run browser.py youtube-search "keyword" -n 5 -min 4 -max 20  # 4-20 min video
 uv run browser.py youtube-download "https://youtube.com/watch?v=..." -o ./downloads -q 720p
 uv run browser.py youtube-download "keyword" --search -n 5 -o ./downloads
 uv run browser.py youtube-download "keyword" --search -n 5 -min 4 -max 20 -o ./downloads
+
+# TikTok (uses Playwright for search, yt-dlp for download)
+# Note: Use --no-headless for search - TikTok blocks headless browsers
+uv run browser.py tiktok-login -a mytiktok  # Login and save session
+uv run browser.py tiktok-login -a mytiktok -w 180  # Wait 3 min for login
+uv run browser.py tiktok-search "keyword" -n 10 --no-headless
+uv run browser.py tiktok-search "#dance" -n 5 --no-headless  # Search by hashtag
+uv run browser.py tiktok-search "keyword" -n 10 -a mytiktok --no-headless  # With account
+uv run browser.py tiktok-download "https://tiktok.com/@user/video/123" -o ./downloads
+uv run browser.py tiktok-download "keyword" --search -n 5 -o ./downloads --no-headless
+uv run browser.py tiktok-download "#funny" --search -n 10 -o ./downloads -p 3 --no-headless
 ```
 
 ## Architecture
@@ -59,11 +70,12 @@ uv run browser.py youtube-download "keyword" --search -n 5 -min 4 -max 20 -o ./d
   - `browser.py` - Main CLI entry point with all commands
   - `google_image.py` - GoogleImage dataclass for Google Images automation
   - `youtube.py` - YouTubeSearch and YouTubeDownload dataclasses for YouTube
+  - `tiktok.py` - TikTokSearch and TikTokDownload dataclasses for TikTok
   - `pyproject.toml` - Dependencies (playwright, requests, yt-dlp)
 
 ### Key Patterns
 
-**Dataclass CLI Pattern**: Feature modules (`google_image.py`, `youtube.py`) use dataclasses with class variables for CLI metadata:
+**Dataclass CLI Pattern**: Feature modules (`google_image.py`, `youtube.py`, `tiktok.py`) use dataclasses with class variables for CLI metadata:
 - `_cli_name`, `_cli_description` - Command registration
 - `_cli_help`, `_cli_choices`, `_cli_short` - Argument configuration
 - `add_to_parser()` - Auto-generates argparse from dataclass fields

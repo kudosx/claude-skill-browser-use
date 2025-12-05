@@ -14,6 +14,7 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright, Page, Browser, BrowserContext, TimeoutError as PlaywrightTimeout
 from google_image import GoogleImage
 from youtube import YouTubeSearch, YouTubeDownload
+from tiktok import TikTokSearch, TikTokDownload, TikTokLogin
 
 
 # Configure logging
@@ -1057,6 +1058,11 @@ def main():
     YouTubeSearch.add_to_parser(subparsers)
     YouTubeDownload.add_to_parser(subparsers)
 
+    # tiktok commands (auto-generated from TikTok classes)
+    TikTokLogin.add_to_parser(subparsers)
+    TikTokSearch.add_to_parser(subparsers)
+    TikTokDownload.add_to_parser(subparsers)
+
     args = parser.parse_args()
 
     if args.command == "create-login":
@@ -1128,6 +1134,16 @@ def main():
     elif args.command == "youtube-download":
         yt_download = YouTubeDownload.from_args(args)
         yt_download.run()
+    elif args.command == "tiktok-login":
+        tt_login = TikTokLogin.from_args(args)
+        tt_login.run()
+    elif args.command == "tiktok-search":
+        tt_search = TikTokSearch.from_args(args)
+        results = tt_search.run()
+        print(json.dumps(results, indent=2))
+    elif args.command == "tiktok-download":
+        tt_download = TikTokDownload.from_args(args)
+        tt_download.run()
     else:
         parser.print_help()
 
