@@ -30,7 +30,9 @@ uv run browser.py <command> [options]
 | `upload` | Upload files |
 | `download-images` | Download images from src |
 | `download-from-gallery` | Download from click-to-reveal galleries |
-| `google-image` | Search Google Images with filters |
+| `google-image` | Search & download images (DuckDuckGo/Google) |
+| `youtube-search` | Search YouTube and get video URLs |
+| `youtube-download` | Download YouTube videos using yt-dlp |
 
 ### `create-login` - Save Login Session
 
@@ -264,33 +266,169 @@ uv run browser.py download-from-gallery \
 ```
 
 **Performance:**
-| Method | Time for 20 images |
-|--------|-------------------|
-| Click-based | ~110 seconds |
-| Fast regex extraction | ~5.7 seconds |
+| Method | Time for 20 images | Time for 100 images |
+|--------|-------------------|---------------------|
+| Click-based | ~110 seconds | N/A |
+| Fast regex extraction | ~5.7 seconds | ~15 seconds |
+| **DuckDuckGo (no browser)** | **~9 seconds** | **~19 seconds** |
 
-### `google-image` - Search Google Images
+### `google-image` - Search and Download Images
 
-Search Google Images with size filters.
+Search images using DuckDuckGo (fastest, no browser) or Google Images with tiered fallback.
 
 ```bash
-uv run browser.py google-image <keyword> <account> [options]
+uv run browser.py google-image <keyword> [options]
 ```
 
 **Arguments:**
 - `keyword` - Search keyword
-- `account` - Account name for authentication
 
 **Options:**
-- `--size, -s` - Size filter: `Large`, `Medium`, `Icon` (default: Large)
-- `--output, -o` - Screenshot output path
+- `--account, -a` - Account name for Google authentication (optional, not needed for DuckDuckGo)
+- `--size, -s` - Size filter: `4k`, `fullhd`, `Large`, `Medium`, `Icon` (default: Large)
+  - `4k` - 3840px minimum dimension
+  - `fullhd` - 1920px minimum dimension
+  - `Large` - 1000px minimum dimension
+  - `Medium` - 400px minimum dimension
+  - `Icon` - No minimum
+- `--download, -n` - Number of images to download (default: 0 = no download)
+- `--download-dir, -o` - Directory to save downloaded images (default: ./downloads)
+- `--source, -S` - Image source: `auto`, `duckduckgo`, `google` (default: auto)
+- `--output, -O` - Screenshot output path
 - `--no-headless` - Show browser window
 - `--keep-open, -k` - Keep browser open for N seconds
+- `--workers, -w` - Number of parallel download workers (default: 10)
+
+**Examples:**
+```bash
+# DuckDuckGo mode - fastest, no browser needed
+uv run browser.py google-image "landscape wallpaper" -n 100 -o ./downloads
+
+# DuckDuckGo with size filter
+uv run browser.py google-image "nature" -n 50 -o ./downloads -S duckduckgo -s Large
+
+# Download 4K images (3840px+ minimum)
+uv run browser.py google-image "wallpaper" -n 20 -o ./downloads -s 4k
+
+# Download FullHD images (1920px+ minimum)
+uv run browser.py google-image "wallpaper" -n 50 -o ./downloads -s fullhd
+
+# Google mode - requires account
+uv run browser.py google-image "keyword" -a myaccount -n 50 -o ./downloads -S google
+
+# Auto mode (default) - tries DuckDuckGo first, falls back to Google
+uv run browser.py google-image "keyword" -n 100 -o ./downloads
+```
+
+**Source Options:**
+| Option | Browser | Speed | Use Case |
+|--------|---------|-------|----------|
+| `duckduckgo` | No | ~2-3s search | Default, fastest |
+| `google` | Yes | ~8-15s search | More results, needs account |
+| `auto` | Maybe | Varies | DuckDuckGo first, Google fallback |
+
+---
+
+## YouTube Commands
+
+### `youtube-search` - Search YouTube Videos
+
+Search YouTube and get video information as JSON with optional duration filtering.
+
+```bash
+uv run browser.py youtube-search <keyword> [options]
+```
+
+**Arguments:**
+- `keyword` - Search query
+
+**Options:**
+- `--num, -n` - Number of results to return (default: 10)
+- `--output, -o` - JSON output path for results
+- `--screenshot, -s` - Screenshot output path
+- `--min-duration, -min` - Minimum video duration in minutes
+- `--max-duration, -max` - Maximum video duration in minutes
+- `--no-headless` - Show browser window
 
 **Example:**
 ```bash
-uv run browser.py google-image "landscape wallpaper" myaccount --size Large -o results.png
+# Search and display results
+uv run browser.py youtube-search "python tutorial" -n 5
+
+# Save results to JSON
+uv run browser.py youtube-search "lofi music" -n 20 -o results.json
+
+# Take screenshot of search results
+uv run browser.py youtube-search "coding music" -s search.png
+
+# Search with duration filter (4-20 minutes only)
+uv run browser.py youtube-search "lofi music" -n 10 -min 4 -max 20
 ```
+
+**Output Format:**
+```json
+[
+  {
+    "url": "https://www.youtube.com/watch?v=...",
+    "title": "Video Title",
+    "channel": "Channel Name",
+    "duration": "10:30",
+    "views": "1.2M views"
+  }
+]
+```
+
+### `youtube-download` - Download YouTube Videos
+
+Download YouTube videos using yt-dlp with quality and duration options.
+
+```bash
+uv run browser.py youtube-download <url> [options]
+```
+
+**Arguments:**
+- `url` - YouTube video URL or search query (with `--search`)
+
+**Options:**
+- `--output_dir, -o` - Directory to save videos (default: `.`)
+- `--quality, -q` - Video quality: `best`, `1080p`, `720p`, `480p`, `360p`, `audio` (default: best)
+- `--search, -s` - Treat input as search query instead of URL
+- `--audio_only, -a` - Download audio only as MP3
+- `--num, -n` - Number of videos to download with `--search` (default: 1)
+- `--min-duration, -min` - Minimum video duration in minutes (with `--search`)
+- `--max-duration, -max` - Maximum video duration in minutes (with `--search`)
+- `--parallel, -p` - Number of parallel downloads (default: 3)
+
+**Examples:**
+```bash
+# Download single video
+uv run browser.py youtube-download "https://www.youtube.com/watch?v=dQw4w9WgXcQ" -o ./videos
+
+# Download with specific quality
+uv run browser.py youtube-download "https://youtube.com/watch?v=..." -q 720p -o ./videos
+
+# Download audio only
+uv run browser.py youtube-download "https://youtube.com/watch?v=..." -a -o ./music
+
+# Search and download (combines search + download)
+uv run browser.py youtube-download "python tutorial" --search -o ./videos
+
+# Search and download multiple videos
+uv run browser.py youtube-download "lofi music" --search -n 5 -o ./music
+
+# Search and download with duration filter (4-20 min videos only)
+uv run browser.py youtube-download "lofi music" --search -n 5 -min 4 -max 20 -o ./music
+```
+
+**Quality Options:**
+| Option | Description |
+|--------|-------------|
+| `best` | Best available quality (default) |
+| `1080p` | 1080p or lower |
+| `720p` | 720p or lower |
+| `480p` | 480p or lower |
+| `360p` | 360p or lower |
+| `audio` | Best audio only |
 
 ---
 

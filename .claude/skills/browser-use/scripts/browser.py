@@ -7,12 +7,28 @@ Run with: uv run browser.py <command> [options]
 import argparse
 import base64
 import json
+import logging
 import time
 import requests
 from pathlib import Path
 from playwright.sync_api import sync_playwright, Page, Browser, BrowserContext, TimeoutError as PlaywrightTimeout
 from google_image import GoogleImage
+from youtube import YouTubeSearch, YouTubeDownload
 
+
+# Configure logging
+LOG_FILE = Path.cwd() / "browser.log"
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    handlers=[
+        logging.FileHandler(LOG_FILE),
+        logging.StreamHandler(),
+    ],
+)
+logger = logging.getLogger(__name__)
 
 # Default auth directory relative to project root
 AUTH_DIR = Path(__file__).parent.parent.parent.parent.parent / ".auth"
@@ -64,13 +80,13 @@ def wait_with_browser_check(page: Page, timeout: int) -> None:
         try:
             # Check if page is closed
             if page.is_closed():
-                print("Browser closed by user.")
+                logger.info("Browser closed by user")
                 return
 
             # Try to access page to verify it's still responsive
             page.evaluate("1")
         except Exception:
-            print("Browser closed by user.")
+            logger.info("Browser closed by user")
             return
 
         time.sleep(1)
@@ -133,8 +149,8 @@ def create_login(url: str, account: str, wait_seconds: int = 120, channel: str |
     user_data_dir.mkdir(parents=True, exist_ok=True)
 
     with sync_playwright() as p:
-        print(f"Using browser channel: {channel}")
-        print(f"Using profile directory: {user_data_dir}")
+        logger.info("Using browser channel: %s", channel)
+        logger.debug("Using profile directory: %s", user_data_dir)
 
         # Use persistent context to maintain login state and bypass automation detection
         context = p.chromium.launch_persistent_context(
@@ -151,13 +167,13 @@ def create_login(url: str, account: str, wait_seconds: int = 120, channel: str |
             ],
             ignore_default_args=["--enable-automation"],
         )
-        print(f"Browser version: {context.browser.version if context.browser else 'N/A'}")
+        logger.debug("Browser version: %s", context.browser.version if context.browser else "N/A")
         page = context.pages[0] if context.pages else context.new_page()
         page.goto(url)
 
-        print(f"Browser opened at: {url}")
-        print(f"Please login manually. Session will be saved in {wait_seconds} seconds...")
-        print("(Or close the browser tab when done)")
+        logger.info("Browser opened at: %s", url)
+        logger.info("Please login manually. Session will be saved in %d seconds...", wait_seconds)
+        logger.info("(Or close the browser tab when done)")
 
         # Wait for either timeout or page close
         elapsed = 0
@@ -166,15 +182,15 @@ def create_login(url: str, account: str, wait_seconds: int = 120, channel: str |
             elapsed += 1
             remaining = wait_seconds - elapsed
             if remaining > 0 and remaining % 30 == 0:
-                print(f"  {remaining} seconds remaining...")
+                logger.info("  %d seconds remaining...", remaining)
 
         # Save storage state (cookies, localStorage, etc.)
         if not context.pages:
             # If all pages closed, we can't save - reopen briefly
-            print("Browser closed. Attempting to save session...")
+            logger.info("Browser closed. Attempting to save session...")
         else:
             context.storage_state(path=str(auth_file))
-            print(f"Authentication saved to: {auth_file}")
+            logger.info("Authentication saved to: %s", auth_file)
 
         context.close()
 
@@ -193,7 +209,7 @@ def goto(url: str, headless: bool = True, screenshot: str | None = None, wait: f
             # Use persistent context with saved profile
             user_data_dir = get_playwright_user_data_dir(account)
             if not user_data_dir.exists():
-                print(f"Warning: Account '{account}' not found. Run 'create-login' first.")
+                logger.warning("Account '%s' not found. Run 'create-login' first.", account)
                 return ""
             context = p.chromium.launch_persistent_context(
                 str(user_data_dir),
@@ -214,7 +230,7 @@ def goto(url: str, headless: bool = True, screenshot: str | None = None, wait: f
 
         if screenshot:
             page.screenshot(path=screenshot, full_page=True)
-            print(f"Screenshot saved to: {screenshot}")
+            logger.info("Screenshot saved to: %s", screenshot)
 
         content = page.content()
         context.close()
@@ -228,7 +244,7 @@ def screenshot(url: str, output: str = "screenshot.png", full_page: bool = True,
             # Use persistent context with saved profile
             user_data_dir = get_playwright_user_data_dir(account)
             if not user_data_dir.exists():
-                print(f"Warning: Account '{account}' not found. Run 'create-login' first.")
+                logger.warning("Account '%s' not found. Run 'create-login' first.", account)
                 return
             context = p.chromium.launch_persistent_context(
                 str(user_data_dir),
@@ -247,7 +263,7 @@ def screenshot(url: str, output: str = "screenshot.png", full_page: bool = True,
         page.goto(url)
         wait_for_page_load(page, extra_wait=wait)
         page.screenshot(path=output, full_page=full_page)
-        print(f"Screenshot saved to: {output}")
+        logger.info("Screenshot saved to: %s", output)
         context.close()
 
 
@@ -322,7 +338,7 @@ def click(url: str, selector: str, wait_after: float = 1, screenshot: str | None
         if account:
             user_data_dir = get_playwright_user_data_dir(account)
             if not user_data_dir.exists():
-                print(f"Warning: Account '{account}' not found. Run 'create-login' first.")
+                logger.warning("Account '%s' not found. Run 'create-login' first.", account)
                 return ""
             context = p.chromium.launch_persistent_context(
                 str(user_data_dir),
@@ -355,14 +371,14 @@ def click(url: str, selector: str, wait_after: float = 1, screenshot: str | None
         # Perform click
         page.locator(selector).click(**click_opts)
         click_type = "Double-clicked" if click_count == 2 else "Clicked"
-        print(f"{click_type}: {selector} (button={button})")
+        logger.info("%s: %s (button=%s)", click_type, selector, button)
 
         if wait_after > 0:
             time.sleep(wait_after)
 
         if screenshot:
             page.screenshot(path=screenshot, full_page=True)
-            print(f"Screenshot saved to: {screenshot}")
+            logger.info("Screenshot saved to: %s", screenshot)
 
         content = page.content()
         context.close()
@@ -382,7 +398,7 @@ def extract(url: str, selector: str, attribute: str = "src", all_matches: bool =
         if account:
             user_data_dir = get_playwright_user_data_dir(account)
             if not user_data_dir.exists():
-                print(f"Warning: Account '{account}' not found. Run 'create-login' first.")
+                logger.warning("Account '%s' not found. Run 'create-login' first.", account)
                 return "" if not all_matches else []
             context = p.chromium.launch_persistent_context(
                 str(user_data_dir),
@@ -403,7 +419,7 @@ def extract(url: str, selector: str, attribute: str = "src", all_matches: bool =
 
         results = []
         elements = page.locator(selector).all()
-        print(f"Found {len(elements)} elements matching: {selector}")
+        logger.info("Found %d elements matching: %s", len(elements), selector)
 
         for elem in elements:
             try:
@@ -416,18 +432,18 @@ def extract(url: str, selector: str, attribute: str = "src", all_matches: bool =
                     if not all_matches:
                         break
             except Exception as e:
-                print(f"Error extracting {attribute}: {e}")
+                logger.error("Error extracting %s: %s", attribute, e)
                 continue
 
         context.close()
 
         if all_matches:
             for i, r in enumerate(results):
-                print(f"[{i+1}] {r[:100]}..." if len(r) > 100 else f"[{i+1}] {r}")
+                logger.info("[%d] %s", i + 1, r[:100] + "..." if len(r) > 100 else r)
             return results
         else:
             result = results[0] if results else ""
-            print(f"Extracted: {result}")
+            logger.info("Extracted: %s", result)
             return result
 
 
@@ -439,7 +455,7 @@ def pdf(url: str, output: str = "page.pdf") -> None:
         page.goto(url)
         wait_for_page_load(page)
         page.pdf(path=output)
-        print(f"PDF saved to: {output}")
+        logger.info("PDF saved to: %s", output)
         browser.close()
 
 
@@ -452,7 +468,7 @@ def download(url: str, click_selector: str, output_dir: str = ".", account: str 
         if account:
             user_data_dir = get_playwright_user_data_dir(account)
             if not user_data_dir.exists():
-                print(f"Warning: Account '{account}' not found. Run 'create-login' first.")
+                logger.warning("Account '%s' not found. Run 'create-login' first.", account)
                 return None
             context = p.chromium.launch_persistent_context(
                 str(user_data_dir),
@@ -480,7 +496,7 @@ def download(url: str, click_selector: str, output_dir: str = ".", account: str 
         filename = download_obj.suggested_filename
         save_path = output_path / filename
         download_obj.save_as(str(save_path))
-        print(f"Downloaded: {save_path}")
+        logger.info("Downloaded: %s", save_path)
 
         context.close()
         return str(save_path)
@@ -492,7 +508,7 @@ def upload(url: str, input_selector: str, files: list[str], submit_selector: str
         if account:
             user_data_dir = get_playwright_user_data_dir(account)
             if not user_data_dir.exists():
-                print(f"Warning: Account '{account}' not found. Run 'create-login' first.")
+                logger.warning("Account '%s' not found. Run 'create-login' first.", account)
                 return ""
             context = p.chromium.launch_persistent_context(
                 str(user_data_dir),
@@ -514,16 +530,16 @@ def upload(url: str, input_selector: str, files: list[str], submit_selector: str
         # Upload files
         if len(files) == 1:
             page.locator(input_selector).set_input_files(files[0])
-            print(f"Uploaded: {files[0]}")
+            logger.info("Uploaded: %s", files[0])
         else:
             page.locator(input_selector).set_input_files(files)
-            print(f"Uploaded {len(files)} files")
+            logger.info("Uploaded %d files", len(files))
 
         # Optionally submit form
         if submit_selector:
             page.click(submit_selector)
             wait_for_page_load(page)
-            print("Form submitted")
+            logger.info("Form submitted")
 
         content = page.content()
         context.close()
@@ -536,7 +552,7 @@ def upload_with_chooser(url: str, trigger_selector: str, files: list[str], accou
         if account:
             user_data_dir = get_playwright_user_data_dir(account)
             if not user_data_dir.exists():
-                print(f"Warning: Account '{account}' not found. Run 'create-login' first.")
+                logger.warning("Account '%s' not found. Run 'create-login' first.", account)
                 return ""
             context = p.chromium.launch_persistent_context(
                 str(user_data_dir),
@@ -562,10 +578,10 @@ def upload_with_chooser(url: str, trigger_selector: str, files: list[str], accou
         file_chooser = fc_info.value
         if len(files) == 1:
             file_chooser.set_files(files[0])
-            print(f"Uploaded via chooser: {files[0]}")
+            logger.info("Uploaded via chooser: %s", files[0])
         else:
             file_chooser.set_files(files)
-            print(f"Uploaded {len(files)} files via chooser")
+            logger.info("Uploaded %d files via chooser", len(files))
 
         wait_for_page_load(page)
         content = page.content()
@@ -580,7 +596,7 @@ def fill(url: str, selector: str, value: str, press_key: str | None = None, scre
         if account:
             user_data_dir = get_playwright_user_data_dir(account)
             if not user_data_dir.exists():
-                print(f"Warning: Account '{account}' not found. Run 'create-login' first.")
+                logger.warning("Account '%s' not found. Run 'create-login' first.", account)
                 return ""
             context = p.chromium.launch_persistent_context(
                 str(user_data_dir),
@@ -601,17 +617,17 @@ def fill(url: str, selector: str, value: str, press_key: str | None = None, scre
 
         # Fill the input field
         page.locator(selector).fill(value)
-        print(f"Filled '{selector}' with: {value}")
+        logger.info("Filled '%s' with: %s", selector, value)
 
         # Optionally press a key (e.g., Enter)
         if press_key:
             page.locator(selector).press(press_key)
-            print(f"Pressed: {press_key}")
+            logger.info("Pressed: %s", press_key)
             wait_for_page_load(page, extra_wait=wait)
 
         if screenshot:
             page.screenshot(path=screenshot, full_page=True)
-            print(f"Screenshot saved to: {screenshot}")
+            logger.info("Screenshot saved to: %s", screenshot)
 
         content = page.content()
         context.close()
@@ -717,7 +733,7 @@ def download_from_gallery(url: str, thumb_selector: str, full_selector: str, num
         if account:
             user_data_dir = get_playwright_user_data_dir(account)
             if not user_data_dir.exists():
-                print(f"Warning: Account '{account}' not found. Run 'create-login' first.")
+                logger.warning("Account '%s' not found. Run 'create-login' first.", account)
                 return []
             context = p.chromium.launch_persistent_context(
                 str(user_data_dir),
@@ -738,10 +754,10 @@ def download_from_gallery(url: str, thumb_selector: str, full_selector: str, num
 
         # Try fast extraction from page source first (for Google Images)
         if fast and "google.com" in url:
-            print("Fast mode: Extracting URLs from page source...")
+            logger.info("Fast mode: Extracting URLs from page source...")
             html = page.content()
             collected_urls = extract_urls_from_source(html, num_images)
-            print(f"  Found {len(collected_urls)} URLs from page source")
+            logger.info("  Found %d URLs from page source", len(collected_urls))
 
             # If not enough, scroll and try again
             scroll_count = 0
@@ -756,15 +772,15 @@ def download_from_gallery(url: str, thumb_selector: str, full_selector: str, num
                         if len(collected_urls) >= num_images:
                             break
                 scroll_count += 1
-                print(f"  Scroll {scroll_count}: {len(collected_urls)} URLs")
+                logger.debug("  Scroll %d: %d URLs", scroll_count, len(collected_urls))
 
             collected_urls = collected_urls[:num_images]
 
         # Fallback to click method if fast extraction didn't work
         if not collected_urls:
-            print("Fallback: Clicking thumbnails to collect URLs...")
+            logger.info("Fallback: Clicking thumbnails to collect URLs...")
             thumbnails = page.locator(thumb_selector).all()
-            print(f"Found {len(thumbnails)} thumbnails")
+            logger.info("Found %d thumbnails", len(thumbnails))
 
             seen_urls = set()
             for thumb in thumbnails:
@@ -784,7 +800,7 @@ def download_from_gallery(url: str, thumb_selector: str, full_selector: str, num
                             if not (src.startswith("data:") and len(src) < 1000):
                                 seen_urls.add(src)
                                 collected_urls.append(src)
-                                print(f"  [{len(collected_urls)}/{num_images}] URL collected")
+                                logger.debug("  [%d/%d] URL collected", len(collected_urls), num_images)
 
                     page.keyboard.press("Escape")
                     time.sleep(0.2)
@@ -798,7 +814,7 @@ def download_from_gallery(url: str, thumb_selector: str, full_selector: str, num
         context.close()
 
     # Download in parallel
-    print(f"\nDownloading {len(collected_urls)} images (parallel={parallel})...")
+    logger.info("Downloading %d images (parallel=%d)...", len(collected_urls), parallel)
     downloaded_files = []
 
     with ThreadPoolExecutor(max_workers=parallel) as executor:
@@ -811,9 +827,9 @@ def download_from_gallery(url: str, thumb_selector: str, full_selector: str, num
             result = future.result()
             if result:
                 downloaded_files.append(result)
-                print(f"  Downloaded: {Path(result).name}")
+                logger.debug("  Downloaded: %s", Path(result).name)
 
-    print(f"\nCompleted! Downloaded {len(downloaded_files)} images to {output_path}")
+    logger.info("Completed! Downloaded %d images to %s", len(downloaded_files), output_path)
     return downloaded_files
 
 
@@ -828,7 +844,7 @@ def download_images(url: str, selector: str, num_images: int = 5, output_dir: st
         if account:
             user_data_dir = get_playwright_user_data_dir(account)
             if not user_data_dir.exists():
-                print(f"Warning: Account '{account}' not found. Run 'create-login' first.")
+                logger.warning("Account '%s' not found. Run 'create-login' first.", account)
                 return []
             context = p.chromium.launch_persistent_context(
                 str(user_data_dir),
@@ -849,7 +865,7 @@ def download_images(url: str, selector: str, num_images: int = 5, output_dir: st
 
         # Find all images matching the selector
         images = page.locator(selector).all()
-        print(f"Found {len(images)} images matching selector: {selector}")
+        logger.info("Found %d images matching selector: %s", len(images), selector)
 
         downloaded = 0
         for i, img in enumerate(images):
@@ -875,7 +891,7 @@ def download_images(url: str, selector: str, num_images: int = 5, output_dir: st
                     filename = output_path / f"image_{downloaded + 1}.{ext}"
                     with open(filename, "wb") as f:
                         f.write(base64.b64decode(data))
-                    print(f"Downloaded: {filename}")
+                    logger.info("Downloaded: %s", filename)
                     downloaded_files.append(str(filename))
                     downloaded += 1
 
@@ -895,20 +911,26 @@ def download_images(url: str, selector: str, num_images: int = 5, output_dir: st
                         filename = output_path / f"image_{downloaded + 1}.{ext}"
                         with open(filename, "wb") as f:
                             f.write(response.content)
-                        print(f"Downloaded: {filename}")
+                        logger.info("Downloaded: %s", filename)
                         downloaded_files.append(str(filename))
                         downloaded += 1
 
             except Exception as e:
-                print(f"Error downloading image {i + 1}: {e}")
+                logger.error("Error downloading image %d: %s", i + 1, e)
                 continue
 
-        print(f"\nDownloaded {downloaded} images to {output_path}")
+        logger.info("Downloaded %d images to %s", downloaded, output_path)
         context.close()
         return downloaded_files
 
 
 def main():
+    import sys
+    # Log startup with separator for easy log reading
+    logger.info("-" * 60)
+    logger.info("browser.py started: %s", " ".join(sys.argv[1:]) or "(no args)")
+    logger.info("-" * 60)
+
     parser = argparse.ArgumentParser(description="Browser automation with Playwright")
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
@@ -1031,6 +1053,10 @@ def main():
     # google-image command (auto-generated from GoogleImage class)
     GoogleImage.add_to_parser(subparsers)
 
+    # youtube commands (auto-generated from YouTube classes)
+    YouTubeSearch.add_to_parser(subparsers)
+    YouTubeDownload.add_to_parser(subparsers)
+
     args = parser.parse_args()
 
     if args.command == "create-login":
@@ -1039,11 +1065,11 @@ def main():
     elif args.command == "accounts":
         accounts = list_accounts()
         if accounts:
-            print("Saved accounts:")
+            logger.info("Saved accounts:")
             for acc in accounts:
-                print(f"  - {acc}")
+                logger.info("  - %s", acc)
         else:
-            print("No saved accounts. Use 'create-login' to save one.")
+            logger.info("No saved accounts. Use 'create-login' to save one.")
     elif args.command == "goto":
         content = goto(args.url, headless=not args.no_headless, screenshot=args.screenshot, wait=args.wait, account=args.account)
         print(content[:2000] if len(content) > 2000 else content)
@@ -1095,6 +1121,13 @@ def main():
     elif args.command == "google-image":
         gimg = GoogleImage.from_args(args)
         gimg.run()
+    elif args.command == "youtube-search":
+        yt_search = YouTubeSearch.from_args(args)
+        results = yt_search.run()
+        print(json.dumps(results, indent=2))
+    elif args.command == "youtube-download":
+        yt_download = YouTubeDownload.from_args(args)
+        yt_download.run()
     else:
         parser.print_help()
 
