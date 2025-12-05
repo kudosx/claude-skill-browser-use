@@ -727,8 +727,8 @@ class YouTubeDownload:
         # Basic options
         cmd.extend([
             "--no-playlist",        # Don't download playlists
-            "--restrict-filenames", # Safe filenames
             "--progress",
+            # Note: removed --restrict-filenames to preserve Unicode in filenames
         ])
 
         # Speed optimizations
