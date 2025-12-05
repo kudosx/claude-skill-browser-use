@@ -11,7 +11,7 @@ This skill enables browsing websites and interacting with web pages using Playwr
 
 ## Quick Start - Use Scripts
 
-Run browser commands from the scripts folder:
+**Important:** All `uv run` commands must be executed from the scripts folder (not the project root):
 
 ```bash
 cd .claude/skills/browser-use/scripts
@@ -30,13 +30,63 @@ uv run browser.py links https://example.com
 
 # Save page as PDF
 uv run browser.py pdf https://example.com -o page.pdf
+
+# Download a file by clicking a download link
+uv run browser.py download https://example.com/downloads "a.download-btn" -o ./downloads
+
+# Upload file(s) to a page
+uv run browser.py upload https://example.com/upload "input[type=file]" myfile.pdf
+uv run browser.py upload https://example.com/upload "input[type=file]" file1.txt file2.txt --submit "button[type=submit]"
+
+# Upload via file chooser dialog (for dynamic inputs)
+uv run browser.py upload-chooser https://example.com/upload "button.upload-trigger" myfile.pdf
+
+# Click an element
+uv run browser.py click https://example.com "button.submit"
+
+# Fill an input field and press Enter
+uv run browser.py fill https://google.com "input[name=q]" "search term" --press Enter
+
+# Extract attribute from elements
+uv run browser.py extract https://example.com "img" --attr src --all
 ```
+
+## Image Download Commands
+
+Download images from websites with optimized performance:
+
+```bash
+cd .claude/skills/browser-use/scripts
+
+# Download images directly from src attribute
+uv run browser.py download-images https://example.com "img.gallery" -n 10 -o ./images
+
+# Download from Google Images (19x faster with regex extraction)
+uv run browser.py download-from-gallery \
+  "https://www.google.com/search?q=keyword&tbm=isch&tbs=isz:l" \
+  "div[data-id] img" \
+  "img[jsname='kn3ccd']" \
+  -n 100 \
+  -o ./downloads \
+  -a myaccount
+
+# Search Google Images with size filter
+uv run browser.py google-image "landscape wallpaper" myaccount --size Large -o results.png
+```
+
+### Google Images Size Filters
+- `tbs=isz:l` - Large images
+- `tbs=isz:m` - Medium images
+- `tbs=isz:i` - Icon size
 
 ## Authentication
 
 Save and reuse login sessions across browser commands. Uses Chrome with stealth mode to bypass automation detection (works with Google, etc.):
 
 ```bash
+# Run from scripts folder
+cd .claude/skills/browser-use/scripts
+
 # Step 1: Create a login session (opens Chrome for manual login)
 # Browser will open maximized - login manually then close the browser
 uv run browser.py create-login https://gemini.google.com/app --account myaccount
@@ -55,67 +105,6 @@ uv run browser.py screenshot https://gemini.google.com/app -o gemini.png --accou
 
 Authentication is stored in `.auth/profiles/` directory (browser profile) and `.auth/*.json` (cookies). Both are automatically added to .gitignore.
 
-## Python API Usage
-
-**Navigate to a URL:**
-```python
-from playwright.sync_api import sync_playwright
-
-with sync_playwright() as p:
-    browser = p.chromium.launch(headless=True)
-    page = browser.new_page()
-    page.goto("https://example.com")
-    content = page.content()
-    browser.close()
-```
-
-**Take a screenshot:**
-```python
-page.screenshot(path="screenshot.png")
-```
-
-**Click elements:**
-```python
-page.click("button#submit")
-page.click("text=Click me")
-page.click("a[href='/login']")
-```
-
-**Fill forms:**
-```python
-page.fill("input[name='username']", "user@example.com")
-page.fill("input[name='password']", "password123")
-page.click("button[type='submit']")
-```
-
-**Extract text content:**
-```python
-text = page.locator("h1").text_content()
-all_links = page.locator("a").all_text_contents()
-```
-
-**Wait for elements:**
-```python
-page.wait_for_selector("div.loaded")
-page.wait_for_load_state("networkidle")
-```
-
-### Async Usage
-```python
-import asyncio
-from playwright.async_api import async_playwright
-
-async def browse():
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
-        page = await browser.new_page()
-        await page.goto("https://example.com")
-        content = await page.content()
-        await browser.close()
-        return content
-
-result = asyncio.run(browse())
-```
 
 ### Best Practices
 - Use `headless=True` for automation tasks
