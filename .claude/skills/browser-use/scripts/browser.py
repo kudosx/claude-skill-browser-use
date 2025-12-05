@@ -5,10 +5,13 @@ Run with: uv run browser.py <command> [options]
 """
 
 import argparse
+import base64
 import json
 import time
+import requests
 from pathlib import Path
-from playwright.sync_api import sync_playwright, Page, Browser, TimeoutError as PlaywrightTimeout
+from playwright.sync_api import sync_playwright, Page, Browser, BrowserContext, TimeoutError as PlaywrightTimeout
+from google_image import GoogleImage
 
 
 # Default auth directory relative to project root
@@ -49,6 +52,31 @@ def wait_for_page_load(page: Page, timeout: int = 10000, extra_wait: float = 0) 
         time.sleep(extra_wait)
 
 
+def wait_with_browser_check(page: Page, timeout: int) -> None:
+    """Wait for timeout seconds, exit early if browser is closed.
+
+    Args:
+        page: Playwright page to monitor.
+        timeout: Maximum seconds to wait.
+    """
+    elapsed = 0
+    while elapsed < timeout:
+        try:
+            # Check if page is closed
+            if page.is_closed():
+                print("Browser closed by user.")
+                return
+
+            # Try to access page to verify it's still responsive
+            page.evaluate("1")
+        except Exception:
+            print("Browser closed by user.")
+            return
+
+        time.sleep(1)
+        elapsed += 1
+
+
 def create_browser(headless: bool = True) -> tuple[Browser, Page]:
     """Create a browser instance and return browser and page."""
     playwright = sync_playwright().start()
@@ -60,6 +88,39 @@ def create_browser(headless: bool = True) -> tuple[Browser, Page]:
 def get_playwright_user_data_dir(account: str) -> Path:
     """Get a separate user data directory for Playwright (won't conflict with running Chrome)."""
     return AUTH_DIR / "profiles" / account
+
+
+def create_authenticated_context(playwright, account: str, headless: bool = True, channel: str = "chrome") -> BrowserContext:
+    """Create a browser context with saved authentication profile.
+
+    Args:
+        playwright: Playwright instance from sync_playwright().
+        account: Account name to use.
+        headless: Run in headless mode.
+        channel: Browser channel (chrome, msedge, chromium).
+
+    Returns:
+        BrowserContext with loaded profile.
+
+    Raises:
+        FileNotFoundError: If account profile doesn't exist.
+    """
+    user_data_dir = get_playwright_user_data_dir(account)
+    if not user_data_dir.exists():
+        raise FileNotFoundError(f"Account '{account}' not found. Run 'create-login' first.")
+
+    return playwright.chromium.launch_persistent_context(
+        str(user_data_dir),
+        headless=headless,
+        channel=channel,
+        no_viewport=True,
+        args=[
+            "--disable-infobars",
+            "--start-maximized",
+            "--disable-blink-features=AutomationControlled",
+        ],
+        ignore_default_args=["--enable-automation", "--no-sandbox"],
+    )
 
 
 def create_login(url: str, account: str, wait_seconds: int = 120, channel: str | None = "chrome") -> None:
@@ -243,22 +304,131 @@ def fill_form(url: str, fields: dict[str, str], submit_selector: str | None = No
         return content
 
 
-def click(url: str, selector: str, wait_after: bool = True) -> str:
-    """Click an element on a page."""
+def click(url: str, selector: str, wait_after: float = 1, screenshot: str | None = None,
+          button: str = "left", click_count: int = 1, modifiers: list[str] | None = None,
+          position: dict | None = None, force: bool = False,
+          headless: bool = True, account: str | None = None, channel: str | None = None) -> str:
+    """Click an element on a page.
+
+    Args:
+        selector: CSS selector of element to click
+        button: Mouse button - "left", "right", or "middle"
+        click_count: Number of clicks (1=click, 2=dblclick)
+        modifiers: Keyboard modifiers - ["Shift"], ["Control"], ["Alt"], ["Meta"]
+        position: Click position relative to element - {"x": 0, "y": 0}
+        force: Force click even if element is obscured
+    """
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        page = browser.new_page(viewport={"width": 1920, "height": 1080})
+        if account:
+            user_data_dir = get_playwright_user_data_dir(account)
+            if not user_data_dir.exists():
+                print(f"Warning: Account '{account}' not found. Run 'create-login' first.")
+                return ""
+            context = p.chromium.launch_persistent_context(
+                str(user_data_dir),
+                headless=headless,
+                channel=channel or "chrome",
+                viewport={"width": 1920, "height": 1080},
+                args=["--disable-infobars"],
+                ignore_default_args=["--enable-automation", "--no-sandbox"],
+            )
+            page = context.pages[0] if context.pages else context.new_page()
+        else:
+            browser = p.chromium.launch(headless=headless, channel=channel)
+            context = browser.new_context(viewport={"width": 1920, "height": 1080})
+            page = context.new_page()
+
         page.goto(url)
         wait_for_page_load(page)
 
-        page.click(selector)
+        # Build click options
+        click_opts = {
+            "button": button,
+            "click_count": click_count,
+            "force": force,
+        }
+        if modifiers:
+            click_opts["modifiers"] = modifiers
+        if position:
+            click_opts["position"] = position
 
-        if wait_after:
-            wait_for_page_load(page)
+        # Perform click
+        page.locator(selector).click(**click_opts)
+        click_type = "Double-clicked" if click_count == 2 else "Clicked"
+        print(f"{click_type}: {selector} (button={button})")
+
+        if wait_after > 0:
+            time.sleep(wait_after)
+
+        if screenshot:
+            page.screenshot(path=screenshot, full_page=True)
+            print(f"Screenshot saved to: {screenshot}")
 
         content = page.content()
-        browser.close()
+        context.close()
         return content
+
+
+def extract(url: str, selector: str, attribute: str = "src", all_matches: bool = False,
+            headless: bool = True, account: str | None = None, channel: str | None = None) -> str | list[str]:
+    """Extract attribute value(s) from element(s) on a page.
+
+    Args:
+        selector: CSS selector of element(s)
+        attribute: Attribute to extract (default: src). Use "text" for text content.
+        all_matches: If True, return all matching elements. If False, return first match only.
+    """
+    with sync_playwright() as p:
+        if account:
+            user_data_dir = get_playwright_user_data_dir(account)
+            if not user_data_dir.exists():
+                print(f"Warning: Account '{account}' not found. Run 'create-login' first.")
+                return "" if not all_matches else []
+            context = p.chromium.launch_persistent_context(
+                str(user_data_dir),
+                headless=headless,
+                channel=channel or "chrome",
+                viewport={"width": 1920, "height": 1080},
+                args=["--disable-infobars"],
+                ignore_default_args=["--enable-automation", "--no-sandbox"],
+            )
+            page = context.pages[0] if context.pages else context.new_page()
+        else:
+            browser = p.chromium.launch(headless=headless, channel=channel)
+            context = browser.new_context(viewport={"width": 1920, "height": 1080})
+            page = context.new_page()
+
+        page.goto(url)
+        wait_for_page_load(page, extra_wait=1)
+
+        results = []
+        elements = page.locator(selector).all()
+        print(f"Found {len(elements)} elements matching: {selector}")
+
+        for elem in elements:
+            try:
+                if attribute == "text":
+                    value = elem.text_content()
+                else:
+                    value = elem.get_attribute(attribute)
+                if value:
+                    results.append(value)
+                    if not all_matches:
+                        break
+            except Exception as e:
+                print(f"Error extracting {attribute}: {e}")
+                continue
+
+        context.close()
+
+        if all_matches:
+            for i, r in enumerate(results):
+                print(f"[{i+1}] {r[:100]}..." if len(r) > 100 else f"[{i+1}] {r}")
+            return results
+        else:
+            result = results[0] if results else ""
+            print(f"Extracted: {result}")
+            return result
 
 
 def pdf(url: str, output: str = "page.pdf") -> None:
@@ -271,6 +441,471 @@ def pdf(url: str, output: str = "page.pdf") -> None:
         page.pdf(path=output)
         print(f"PDF saved to: {output}")
         browser.close()
+
+
+def download(url: str, click_selector: str, output_dir: str = ".", account: str | None = None, channel: str | None = None, timeout: int = 30000) -> str | None:
+    """Download a file by clicking an element that triggers download."""
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    with sync_playwright() as p:
+        if account:
+            user_data_dir = get_playwright_user_data_dir(account)
+            if not user_data_dir.exists():
+                print(f"Warning: Account '{account}' not found. Run 'create-login' first.")
+                return None
+            context = p.chromium.launch_persistent_context(
+                str(user_data_dir),
+                headless=True,
+                channel=channel or "chrome",
+                viewport={"width": 1920, "height": 1080},
+                args=["--disable-infobars"],
+                ignore_default_args=["--enable-automation", "--no-sandbox"],
+                accept_downloads=True,
+            )
+            page = context.pages[0] if context.pages else context.new_page()
+        else:
+            browser = p.chromium.launch(headless=True, channel=channel)
+            context = browser.new_context(viewport={"width": 1920, "height": 1080}, accept_downloads=True)
+            page = context.new_page()
+
+        page.goto(url)
+        wait_for_page_load(page)
+
+        # Start waiting for download before clicking
+        with page.expect_download(timeout=timeout) as download_info:
+            page.click(click_selector)
+
+        download_obj = download_info.value
+        filename = download_obj.suggested_filename
+        save_path = output_path / filename
+        download_obj.save_as(str(save_path))
+        print(f"Downloaded: {save_path}")
+
+        context.close()
+        return str(save_path)
+
+
+def upload(url: str, input_selector: str, files: list[str], submit_selector: str | None = None, account: str | None = None, channel: str | None = None) -> str:
+    """Upload files to a page using a file input element."""
+    with sync_playwright() as p:
+        if account:
+            user_data_dir = get_playwright_user_data_dir(account)
+            if not user_data_dir.exists():
+                print(f"Warning: Account '{account}' not found. Run 'create-login' first.")
+                return ""
+            context = p.chromium.launch_persistent_context(
+                str(user_data_dir),
+                headless=True,
+                channel=channel or "chrome",
+                viewport={"width": 1920, "height": 1080},
+                args=["--disable-infobars"],
+                ignore_default_args=["--enable-automation", "--no-sandbox"],
+            )
+            page = context.pages[0] if context.pages else context.new_page()
+        else:
+            browser = p.chromium.launch(headless=True, channel=channel)
+            context = browser.new_context(viewport={"width": 1920, "height": 1080})
+            page = context.new_page()
+
+        page.goto(url)
+        wait_for_page_load(page)
+
+        # Upload files
+        if len(files) == 1:
+            page.locator(input_selector).set_input_files(files[0])
+            print(f"Uploaded: {files[0]}")
+        else:
+            page.locator(input_selector).set_input_files(files)
+            print(f"Uploaded {len(files)} files")
+
+        # Optionally submit form
+        if submit_selector:
+            page.click(submit_selector)
+            wait_for_page_load(page)
+            print("Form submitted")
+
+        content = page.content()
+        context.close()
+        return content
+
+
+def upload_with_chooser(url: str, trigger_selector: str, files: list[str], account: str | None = None, channel: str | None = None) -> str:
+    """Upload files using file chooser dialog (for dynamic file inputs)."""
+    with sync_playwright() as p:
+        if account:
+            user_data_dir = get_playwright_user_data_dir(account)
+            if not user_data_dir.exists():
+                print(f"Warning: Account '{account}' not found. Run 'create-login' first.")
+                return ""
+            context = p.chromium.launch_persistent_context(
+                str(user_data_dir),
+                headless=True,
+                channel=channel or "chrome",
+                viewport={"width": 1920, "height": 1080},
+                args=["--disable-infobars"],
+                ignore_default_args=["--enable-automation", "--no-sandbox"],
+            )
+            page = context.pages[0] if context.pages else context.new_page()
+        else:
+            browser = p.chromium.launch(headless=True, channel=channel)
+            context = browser.new_context(viewport={"width": 1920, "height": 1080})
+            page = context.new_page()
+
+        page.goto(url)
+        wait_for_page_load(page)
+
+        # Handle file chooser dialog
+        with page.expect_file_chooser() as fc_info:
+            page.click(trigger_selector)
+
+        file_chooser = fc_info.value
+        if len(files) == 1:
+            file_chooser.set_files(files[0])
+            print(f"Uploaded via chooser: {files[0]}")
+        else:
+            file_chooser.set_files(files)
+            print(f"Uploaded {len(files)} files via chooser")
+
+        wait_for_page_load(page)
+        content = page.content()
+        context.close()
+        return content
+
+
+def fill(url: str, selector: str, value: str, press_key: str | None = None, screenshot: str | None = None,
+         wait: float = 0, headless: bool = True, account: str | None = None, channel: str | None = None) -> str:
+    """Fill an input field and optionally press a key (like Enter)."""
+    with sync_playwright() as p:
+        if account:
+            user_data_dir = get_playwright_user_data_dir(account)
+            if not user_data_dir.exists():
+                print(f"Warning: Account '{account}' not found. Run 'create-login' first.")
+                return ""
+            context = p.chromium.launch_persistent_context(
+                str(user_data_dir),
+                headless=headless,
+                channel=channel or "chrome",
+                viewport={"width": 1920, "height": 1080},
+                args=["--disable-infobars"],
+                ignore_default_args=["--enable-automation", "--no-sandbox"],
+            )
+            page = context.pages[0] if context.pages else context.new_page()
+        else:
+            browser = p.chromium.launch(headless=headless, channel=channel)
+            context = browser.new_context(viewport={"width": 1920, "height": 1080})
+            page = context.new_page()
+
+        page.goto(url)
+        wait_for_page_load(page)
+
+        # Fill the input field
+        page.locator(selector).fill(value)
+        print(f"Filled '{selector}' with: {value}")
+
+        # Optionally press a key (e.g., Enter)
+        if press_key:
+            page.locator(selector).press(press_key)
+            print(f"Pressed: {press_key}")
+            wait_for_page_load(page, extra_wait=wait)
+
+        if screenshot:
+            page.screenshot(path=screenshot, full_page=True)
+            print(f"Screenshot saved to: {screenshot}")
+
+        content = page.content()
+        context.close()
+        return content
+
+
+def download_from_gallery(url: str, thumb_selector: str, full_selector: str, num_images: int = 5,
+                          output_dir: str = ".", headless: bool = True,
+                          account: str | None = None, channel: str | None = None,
+                          parallel: int = 10, fast: bool = True) -> list[str]:
+    """Download full-size images by clicking thumbnails then extracting from preview.
+
+    Generic function for click-to-reveal galleries (works with Google Images, Pinterest, etc.)
+
+    Args:
+        thumb_selector: CSS selector for thumbnail elements to click
+        full_selector: CSS selector for full-size image element after clicking
+        parallel: Number of parallel downloads (default: 10)
+        fast: Use fast regex extraction for Google Images (default: True)
+    """
+    import re
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+    collected_urls = []
+
+    def download_single(args: tuple) -> str | None:
+        """Download a single image. Returns filename or None."""
+        idx, src = args
+        try:
+            if src.startswith("data:"):
+                header, data = src.split(",", 1)
+                ext = "jpg"
+                if "png" in header:
+                    ext = "png"
+                elif "gif" in header:
+                    ext = "gif"
+                elif "webp" in header:
+                    ext = "webp"
+
+                img_data = base64.b64decode(data)
+                if len(img_data) < 1000:
+                    return None
+                filename = output_path / f"image_{idx}.{ext}"
+                with open(filename, "wb") as f:
+                    f.write(img_data)
+                return str(filename)
+
+            elif src.startswith("http"):
+                response = requests.get(src, timeout=10, headers={
+                    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+                })
+                if response.status_code == 200 and len(response.content) > 1000:
+                    content_type = response.headers.get("content-type", "")
+                    ext = "jpg"
+                    if "png" in content_type:
+                        ext = "png"
+                    elif "gif" in content_type:
+                        ext = "gif"
+                    elif "webp" in content_type:
+                        ext = "webp"
+
+                    filename = output_path / f"image_{idx}.{ext}"
+                    with open(filename, "wb") as f:
+                        f.write(response.content)
+                    return str(filename)
+        except Exception:
+            pass
+        return None
+
+    def extract_urls_from_source(html: str, limit: int) -> list[str]:
+        """Extract full-size image URLs from Google Images page source using regex."""
+        urls = []
+        seen = set()
+
+        # Pattern to match full-res image URLs in script tags
+        # Matches URLs like ["https://example.com/image.jpg",width,height]
+        pattern = r'\["(https?://[^"]+)",\s*\d+,\s*\d+\]'
+
+        for match in re.finditer(pattern, html):
+            url = match.group(1)
+            # Skip thumbnails and data URLs
+            if "encrypted-tbn0.gstatic.com" in url:
+                continue
+            if url.startswith("data:"):
+                continue
+            # Decode unicode escapes
+            try:
+                url = bytes(url, 'ascii').decode('unicode-escape')
+            except Exception:
+                pass
+
+            if url not in seen and url.startswith("http"):
+                seen.add(url)
+                urls.append(url)
+                if len(urls) >= limit:
+                    break
+
+        return urls
+
+    with sync_playwright() as p:
+        if account:
+            user_data_dir = get_playwright_user_data_dir(account)
+            if not user_data_dir.exists():
+                print(f"Warning: Account '{account}' not found. Run 'create-login' first.")
+                return []
+            context = p.chromium.launch_persistent_context(
+                str(user_data_dir),
+                headless=headless,
+                channel=channel or "chrome",
+                viewport={"width": 1920, "height": 1080},
+                args=["--disable-infobars"],
+                ignore_default_args=["--enable-automation", "--no-sandbox"],
+            )
+            page = context.pages[0] if context.pages else context.new_page()
+        else:
+            browser = p.chromium.launch(headless=headless, channel=channel)
+            context = browser.new_context(viewport={"width": 1920, "height": 1080})
+            page = context.new_page()
+
+        page.goto(url)
+        wait_for_page_load(page, extra_wait=1)
+
+        # Try fast extraction from page source first (for Google Images)
+        if fast and "google.com" in url:
+            print("Fast mode: Extracting URLs from page source...")
+            html = page.content()
+            collected_urls = extract_urls_from_source(html, num_images)
+            print(f"  Found {len(collected_urls)} URLs from page source")
+
+            # If not enough, scroll and try again
+            scroll_count = 0
+            while len(collected_urls) < num_images and scroll_count < 10:
+                page.evaluate("window.scrollBy(0, window.innerHeight * 2)")
+                time.sleep(0.5)
+                html = page.content()
+                new_urls = extract_urls_from_source(html, num_images * 2)
+                for u in new_urls:
+                    if u not in collected_urls:
+                        collected_urls.append(u)
+                        if len(collected_urls) >= num_images:
+                            break
+                scroll_count += 1
+                print(f"  Scroll {scroll_count}: {len(collected_urls)} URLs")
+
+            collected_urls = collected_urls[:num_images]
+
+        # Fallback to click method if fast extraction didn't work
+        if not collected_urls:
+            print("Fallback: Clicking thumbnails to collect URLs...")
+            thumbnails = page.locator(thumb_selector).all()
+            print(f"Found {len(thumbnails)} thumbnails")
+
+            seen_urls = set()
+            for thumb in thumbnails:
+                if len(collected_urls) >= num_images:
+                    break
+                try:
+                    thumb.click()
+                    try:
+                        page.locator(full_selector).first.wait_for(state="visible", timeout=2000)
+                    except Exception:
+                        time.sleep(0.5)
+
+                    full_img = page.locator(full_selector).first
+                    if full_img.is_visible():
+                        src = full_img.get_attribute("src")
+                        if src and src not in seen_urls:
+                            if not (src.startswith("data:") and len(src) < 1000):
+                                seen_urls.add(src)
+                                collected_urls.append(src)
+                                print(f"  [{len(collected_urls)}/{num_images}] URL collected")
+
+                    page.keyboard.press("Escape")
+                    time.sleep(0.2)
+                except Exception:
+                    try:
+                        page.keyboard.press("Escape")
+                    except Exception:
+                        pass
+                    time.sleep(0.1)
+
+        context.close()
+
+    # Download in parallel
+    print(f"\nDownloading {len(collected_urls)} images (parallel={parallel})...")
+    downloaded_files = []
+
+    with ThreadPoolExecutor(max_workers=parallel) as executor:
+        futures = {
+            executor.submit(download_single, (i + 1, u)): i
+            for i, u in enumerate(collected_urls)
+        }
+
+        for future in as_completed(futures):
+            result = future.result()
+            if result:
+                downloaded_files.append(result)
+                print(f"  Downloaded: {Path(result).name}")
+
+    print(f"\nCompleted! Downloaded {len(downloaded_files)} images to {output_path}")
+    return downloaded_files
+
+
+def download_images(url: str, selector: str, num_images: int = 5, output_dir: str = ".",
+                    headless: bool = True, account: str | None = None, channel: str | None = None) -> list[str]:
+    """Download images directly from src attribute (for simple galleries with direct URLs)."""
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+    downloaded_files = []
+
+    with sync_playwright() as p:
+        if account:
+            user_data_dir = get_playwright_user_data_dir(account)
+            if not user_data_dir.exists():
+                print(f"Warning: Account '{account}' not found. Run 'create-login' first.")
+                return []
+            context = p.chromium.launch_persistent_context(
+                str(user_data_dir),
+                headless=headless,
+                channel=channel or "chrome",
+                viewport={"width": 1920, "height": 1080},
+                args=["--disable-infobars"],
+                ignore_default_args=["--enable-automation", "--no-sandbox"],
+            )
+            page = context.pages[0] if context.pages else context.new_page()
+        else:
+            browser = p.chromium.launch(headless=headless, channel=channel)
+            context = browser.new_context(viewport={"width": 1920, "height": 1080})
+            page = context.new_page()
+
+        page.goto(url)
+        wait_for_page_load(page, extra_wait=2)
+
+        # Find all images matching the selector
+        images = page.locator(selector).all()
+        print(f"Found {len(images)} images matching selector: {selector}")
+
+        downloaded = 0
+        for i, img in enumerate(images):
+            if downloaded >= num_images:
+                break
+
+            try:
+                src = img.get_attribute("src")
+                if not src:
+                    continue
+
+                if src.startswith("data:"):
+                    # Base64 encoded image
+                    header, data = src.split(",", 1)
+                    ext = "jpg"
+                    if "png" in header:
+                        ext = "png"
+                    elif "gif" in header:
+                        ext = "gif"
+                    elif "webp" in header:
+                        ext = "webp"
+
+                    filename = output_path / f"image_{downloaded + 1}.{ext}"
+                    with open(filename, "wb") as f:
+                        f.write(base64.b64decode(data))
+                    print(f"Downloaded: {filename}")
+                    downloaded_files.append(str(filename))
+                    downloaded += 1
+
+                elif src.startswith("http"):
+                    # URL - download via requests
+                    response = requests.get(src, timeout=10)
+                    if response.status_code == 200:
+                        content_type = response.headers.get("content-type", "")
+                        ext = "jpg"
+                        if "png" in content_type:
+                            ext = "png"
+                        elif "gif" in content_type:
+                            ext = "gif"
+                        elif "webp" in content_type:
+                            ext = "webp"
+
+                        filename = output_path / f"image_{downloaded + 1}.{ext}"
+                        with open(filename, "wb") as f:
+                            f.write(response.content)
+                        print(f"Downloaded: {filename}")
+                        downloaded_files.append(str(filename))
+                        downloaded += 1
+
+            except Exception as e:
+                print(f"Error downloading image {i + 1}: {e}")
+                continue
+
+        print(f"\nDownloaded {downloaded} images to {output_path}")
+        context.close()
+        return downloaded_files
 
 
 def main():
@@ -312,10 +947,89 @@ def main():
     links_parser = subparsers.add_parser("links", help="Extract links from a page")
     links_parser.add_argument("url", help="URL to extract links from")
 
+    # click command
+    click_parser = subparsers.add_parser("click", help="Click an element on a page")
+    click_parser.add_argument("url", help="URL of the page")
+    click_parser.add_argument("selector", help="CSS selector of element to click")
+    click_parser.add_argument("--wait", "-w", type=float, default=1, help="Wait time after click (default: 1)")
+    click_parser.add_argument("--screenshot", "-s", help="Save screenshot after click")
+    click_parser.add_argument("--button", "-b", default="left", choices=["left", "right", "middle"], help="Mouse button")
+    click_parser.add_argument("--dblclick", action="store_true", help="Double click")
+    click_parser.add_argument("--shift", action="store_true", help="Hold Shift while clicking")
+    click_parser.add_argument("--ctrl", action="store_true", help="Hold Control while clicking")
+    click_parser.add_argument("--force", action="store_true", help="Force click even if element is obscured")
+    click_parser.add_argument("--no-headless", action="store_true", help="Show browser window")
+    click_parser.add_argument("--account", "-a", help="Use saved account for authentication")
+
+    # extract command
+    extract_parser = subparsers.add_parser("extract", help="Extract attribute from element(s)")
+    extract_parser.add_argument("url", help="URL of the page")
+    extract_parser.add_argument("selector", help="CSS selector of element(s)")
+    extract_parser.add_argument("--attr", default="src", help="Attribute to extract (default: src). Use 'text' for text content")
+    extract_parser.add_argument("--all", action="store_true", help="Extract from all matching elements")
+    extract_parser.add_argument("--no-headless", action="store_true", help="Show browser window")
+    extract_parser.add_argument("--account", "-a", help="Use saved account for authentication")
+
     # pdf command
     pdf_parser = subparsers.add_parser("pdf", help="Save page as PDF")
     pdf_parser.add_argument("url", help="URL to save")
     pdf_parser.add_argument("--output", "-o", default="page.pdf", help="Output file")
+
+    # download command
+    download_parser = subparsers.add_parser("download", help="Download a file by clicking an element")
+    download_parser.add_argument("url", help="URL of the page with download link")
+    download_parser.add_argument("selector", help="CSS selector of element to click for download")
+    download_parser.add_argument("--output-dir", "-o", default=".", help="Directory to save downloaded file")
+    download_parser.add_argument("--account", "-a", help="Use saved account for authentication")
+    download_parser.add_argument("--timeout", "-t", type=int, default=30000, help="Download timeout in ms (default: 30000)")
+
+    # upload command
+    upload_parser = subparsers.add_parser("upload", help="Upload files to a page")
+    upload_parser.add_argument("url", help="URL of the page with upload form")
+    upload_parser.add_argument("selector", help="CSS selector of file input element")
+    upload_parser.add_argument("files", nargs="+", help="File(s) to upload")
+    upload_parser.add_argument("--submit", "-s", help="CSS selector of submit button (optional)")
+    upload_parser.add_argument("--account", "-a", help="Use saved account for authentication")
+
+    # upload-chooser command (for dynamic file inputs)
+    upload_chooser_parser = subparsers.add_parser("upload-chooser", help="Upload files via file chooser dialog")
+    upload_chooser_parser.add_argument("url", help="URL of the page")
+    upload_chooser_parser.add_argument("trigger", help="CSS selector of element that opens file chooser")
+    upload_chooser_parser.add_argument("files", nargs="+", help="File(s) to upload")
+    upload_chooser_parser.add_argument("--account", "-a", help="Use saved account for authentication")
+
+    # fill command
+    fill_parser = subparsers.add_parser("fill", help="Fill an input field and optionally press a key")
+    fill_parser.add_argument("url", help="URL of the page")
+    fill_parser.add_argument("selector", help="CSS selector of the input element")
+    fill_parser.add_argument("value", help="Value to fill")
+    fill_parser.add_argument("--press", "-p", help="Key to press after filling (e.g., Enter)")
+    fill_parser.add_argument("--screenshot", "-s", help="Save screenshot after action")
+    fill_parser.add_argument("--wait", "-w", type=float, default=2, help="Extra wait time after pressing key (default: 2)")
+    fill_parser.add_argument("--no-headless", action="store_true", help="Show browser window")
+    fill_parser.add_argument("--account", "-a", help="Use saved account for authentication")
+
+    # download-images command
+    download_images_parser = subparsers.add_parser("download-images", help="Download images directly from src")
+    download_images_parser.add_argument("url", help="URL of the page with images")
+    download_images_parser.add_argument("selector", help="CSS selector for img elements")
+    download_images_parser.add_argument("--num", "-n", type=int, default=5, help="Number of images to download (default: 5)")
+    download_images_parser.add_argument("--output-dir", "-o", default=".", help="Directory to save images")
+    download_images_parser.add_argument("--no-headless", action="store_true", help="Show browser window")
+    download_images_parser.add_argument("--account", "-a", help="Use saved account for authentication")
+
+    # download-from-gallery command
+    gallery_parser = subparsers.add_parser("download-from-gallery", help="Download images by clicking thumbnails")
+    gallery_parser.add_argument("url", help="URL of the gallery page")
+    gallery_parser.add_argument("thumb_selector", help="CSS selector for thumbnail elements to click")
+    gallery_parser.add_argument("full_selector", help="CSS selector for full-size image after click")
+    gallery_parser.add_argument("--num", "-n", type=int, default=5, help="Number of images to download (default: 5)")
+    gallery_parser.add_argument("--output-dir", "-o", default=".", help="Directory to save images")
+    gallery_parser.add_argument("--no-headless", action="store_true", help="Show browser window")
+    gallery_parser.add_argument("--account", "-a", help="Use saved account for authentication")
+
+    # google-image command (auto-generated from GoogleImage class)
+    GoogleImage.add_to_parser(subparsers)
 
     args = parser.parse_args()
 
@@ -341,8 +1055,46 @@ def main():
     elif args.command == "links":
         links = get_links(args.url)
         print(json.dumps(links, indent=2))
+    elif args.command == "click":
+        modifiers = []
+        if args.shift:
+            modifiers.append("Shift")
+        if args.ctrl:
+            modifiers.append("Control")
+        click_count = 2 if args.dblclick else 1
+        content = click(args.url, args.selector, args.wait, args.screenshot,
+                        args.button, click_count, modifiers if modifiers else None,
+                        None, args.force, headless=not args.no_headless, account=args.account)
+        print(content[:2000] if len(content) > 2000 else content)
+    elif args.command == "extract":
+        result = extract(args.url, args.selector, args.attr, getattr(args, 'all', False),
+                         headless=not args.no_headless, account=args.account)
+        if isinstance(result, list):
+            print(json.dumps(result, indent=2))
+        else:
+            print(result)
     elif args.command == "pdf":
         pdf(args.url, args.output)
+    elif args.command == "download":
+        download(args.url, args.selector, args.output_dir, args.account, timeout=args.timeout)
+    elif args.command == "upload":
+        upload(args.url, args.selector, args.files, args.submit, args.account)
+    elif args.command == "upload-chooser":
+        upload_with_chooser(args.url, args.trigger, args.files, args.account)
+    elif args.command == "fill":
+        content = fill(args.url, args.selector, args.value, args.press, args.screenshot,
+                       args.wait, headless=not args.no_headless, account=args.account)
+        print(content[:2000] if len(content) > 2000 else content)
+    elif args.command == "download-images":
+        download_images(args.url, args.selector, args.num, args.output_dir,
+                        headless=not args.no_headless, account=args.account)
+    elif args.command == "download-from-gallery":
+        download_from_gallery(args.url, args.thumb_selector, args.full_selector,
+                              args.num, args.output_dir,
+                              headless=not args.no_headless, account=args.account)
+    elif args.command == "google-image":
+        gimg = GoogleImage.from_args(args)
+        gimg.run()
     else:
         parser.print_help()
 

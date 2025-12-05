@@ -5,3 +5,9 @@ __pycache__/
 
 !.claude/
 !CLAUDE.md
+# OS files
+.DS_Store
+
+# Download artifacts
+downloads/
+google_images*.png
