@@ -11,3 +11,5 @@ __pycache__/
 # Download artifacts
 downloads/
 google_images*.png
+
+*.log

@@ -33,6 +33,8 @@ Speed & Reliability Hierarchy:
 |------|-----------|-----|
 | YouTube search/download | `yt-dlp` | Purpose-built, handles all edge cases |
 | Image search | `duckduckgo-search` | No browser, no API key, ~2s for 100 images |
+| TikTok download | `yt-dlp` + cookies | Direct download, handles watermarks |
+| TikTok search | Playwright (headful) | Headless is blocked by TikTok |
 | API with JSON response | `requests` | Simple, fast, no overhead |
 | Static HTML scraping | `requests` + `BeautifulSoup` | No JS needed |
 | JS-rendered content | Playwright/Puppeteer | Need browser engine |
@@ -87,6 +89,31 @@ with DDGS() as ddgs:
 ```
 
 **Lesson:** DuckDuckGo provides free image search API. No browser, no API key needed.
+
+### Real Example: TikTok Search & Download
+
+```python
+# WILL NOT WORK: Headless mode (TikTok blocks it)
+browser = p.chromium.launch(headless=True)  # BLOCKED!
+page.goto("https://tiktok.com/search?q=...")
+# Error: Captcha detected or page blocked
+
+# WORKS: Headful mode with stealth flags
+browser = p.chromium.launch(
+    headless=False,  # REQUIRED for TikTok
+    args=[
+        "--disable-blink-features=AutomationControlled",
+        "--disable-dev-shm-usage",
+        "--no-sandbox",
+    ]
+)
+
+# FASTEST: yt-dlp for downloads (~2-3s per video)
+cmd = ["yt-dlp", "--cookies-from-browser", "chrome", url]
+result = subprocess.run(cmd, capture_output=True)
+```
+
+**Lesson:** TikTok uses aggressive bot detection with a custom JS VM. Headless browsers are immediately blocked. Always use headful mode with stealth flags, and prefer yt-dlp with cookies for downloads.
 
 ---
 
@@ -156,10 +183,17 @@ Sometimes only a browser will work:
 # - Heavy JS frameworks (React SPAs)
 # - WebSocket connections
 # - Cookie consent dialogs
+# - TikTok (requires headful mode due to bot detection)
 
-def browser_automation_pattern():
+def browser_automation_pattern(headless=True):
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        browser = p.chromium.launch(
+            headless=headless,
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--disable-dev-shm-usage",
+            ]
+        )
         context = browser.new_context(
             viewport={"width": 1920, "height": 1080},
             user_agent="Mozilla/5.0 ...",
@@ -172,6 +206,17 @@ def browser_automation_pattern():
             context.close()
             browser.close()
 ```
+
+### 4. Platform-Specific Considerations
+
+| Platform | Headless OK? | Key Requirement |
+|----------|--------------|-----------------|
+| YouTube | Yes | Use yt-dlp instead of browser |
+| Google Images | Yes | Regex extraction from HTML |
+| DuckDuckGo | N/A | No browser needed (HTTP API) |
+| TikTok | **NO** | Must use headful + stealth flags |
+| Instagram | No | Requires login + anti-detection |
+| Twitter/X | Partial | API preferred, browser for auth |
 
 ---
 
@@ -447,7 +492,9 @@ Need to automate web task?
 │
 ├─ Static HTML? → requests + BeautifulSoup
 │
-├─ Need JS rendering? → Playwright (headless)
+├─ Need JS rendering?
+│   ├─ TikTok/Instagram? → Playwright (HEADFUL + stealth)
+│   └─ Other sites? → Playwright (headless)
 │
 └─ Complex interaction? → Playwright + persistent profile
 ```
@@ -463,6 +510,8 @@ Need to automate web task?
 - [ ] Handle errors gracefully
 - [ ] Log actions for debugging
 - [ ] Clean up resources (close browsers, sessions)
+- [ ] Check platform-specific requirements (headless vs headful)
+- [ ] Use stealth flags for anti-detection platforms (TikTok, Instagram)
 
 ---
 
@@ -473,3 +522,6 @@ Need to automate web task?
 - [requests Documentation](https://docs.python-requests.org/)
 - [aria2 Manual](https://aria2.github.io/manual/en/html/)
 - [Web Scraping Best Practices 2025](https://www.scraperapi.com/blog/web-scraping-best-practices/)
+- [How to Scrape TikTok - ScrapingBee](https://www.scrapingbee.com/blog/how-to-scrape-tiktok/)
+- [TikTok Bot Detection Analysis - Castle.io](https://blog.castle.io/what-tiktoks-virtual-machine-tells-us-about-modern-bot-defenses/)
+- [PyTok - Playwright TikTok Scraper](https://github.com/networkdynamics/pytok)
