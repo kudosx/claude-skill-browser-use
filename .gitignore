@@ -1,0 +1,7 @@
+.auth
+.venv/
+__pycache__/
+*.pyc
+
+!.claude/
+!CLAUDE.md
