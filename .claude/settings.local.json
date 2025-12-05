@@ -13,7 +13,13 @@
       "Bash(mkdir:*)",
       "Bash(ls:*)",
       "Bash(rm:*)",
-      "Bash(time uv run browser.py:*)"
+      "Bash(time uv run browser.py:*)",
+      "Bash(uv sync:*)",
+      "Bash(for:*)",
+      "Bash(do [ -f \"$f\" ])",
+      "Bash(sips:*)",
+      "Bash(done)",
+      "Bash(git reset:*)"
     ],
     "deny": [],
     "ask": []

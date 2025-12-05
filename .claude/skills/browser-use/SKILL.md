@@ -71,13 +71,85 @@ uv run browser.py download-from-gallery \
   -a myaccount
 
 # Search Google Images with size filter
-uv run browser.py google-image "landscape wallpaper" myaccount --size Large -o results.png
+uv run browser.py google-image "landscape wallpaper" -n 50 -o ./downloads -s Large
+
+# Download 4K images (3840px+ minimum)
+uv run browser.py google-image "wallpaper" -n 20 -o ./downloads -s 4k
+
+# Download FullHD images (1920px+ minimum)
+uv run browser.py google-image "wallpaper" -n 50 -o ./downloads -s fullhd
 ```
 
 ### Google Images Size Filters
+CLI size options (filters by minimum dimension):
+- `-s 4k` - 3840px minimum (4K resolution)
+- `-s fullhd` - 1920px minimum (Full HD)
+- `-s Large` - 1000px minimum
+- `-s Medium` - 400px minimum
+- `-s Icon` - No minimum
+
+Google URL params (used internally):
 - `tbs=isz:l` - Large images
 - `tbs=isz:m` - Medium images
 - `tbs=isz:i` - Icon size
+
+## YouTube Commands
+
+Search and download YouTube videos with duration filtering:
+
+```bash
+cd .claude/skills/browser-use/scripts
+
+# Search YouTube and get video URLs (returns JSON)
+uv run browser.py youtube-search "python tutorial" -n 10
+uv run browser.py youtube-search "lofi music" -n 5 -o results.json -s screenshot.png
+
+# Search with duration filter (4-20 minutes)
+uv run browser.py youtube-search "lofi music" -n 5 -min 4 -max 20
+
+# Download a single video by URL
+uv run browser.py youtube-download "https://www.youtube.com/watch?v=dQw4w9WgXcQ" -o ./downloads
+
+# Download with quality options
+uv run browser.py youtube-download "https://youtube.com/watch?v=..." -q 720p -o ./downloads
+uv run browser.py youtube-download "https://youtube.com/watch?v=..." -q 1080p -o ./downloads
+
+# Download audio only (mp3)
+uv run browser.py youtube-download "https://youtube.com/watch?v=..." -a -o ./music
+
+# Search and download in one command
+uv run browser.py youtube-download "lofi hip hop" --search -o ./downloads
+uv run browser.py youtube-download "python tutorial" --search -n 3 -o ./downloads
+
+# Search and download with duration filter (4-20 min videos only)
+uv run browser.py youtube-download "lofi music" --search -n 5 -min 4 -max 20 -o ./downloads
+```
+
+### YouTube Duration Filters
+- `-min N` - Minimum duration in minutes
+- `-max N` - Maximum duration in minutes
+- Filters use YouTube URL parameters for speed, with Python-side validation as backup
+
+### YouTube Quality Options
+- `best` - Best available quality (default)
+- `1080p` - 1080p or lower
+- `720p` - 720p or lower
+- `480p` - 480p or lower
+- `360p` - 360p or lower
+- `audio` - Best audio only
+
+### YouTube Search Output Format
+```json
+[
+  {
+    "url": "https://www.youtube.com/watch?v=...",
+    "title": "Video Title",
+    "channel": "Channel Name",
+    "duration": "10:30",
+    "views": "1.2M views"
+  }
+]
+```
 
 ## Authentication
 
