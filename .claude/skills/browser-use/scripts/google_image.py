@@ -17,7 +17,7 @@ Optimizations applied:
 
 Usage via browser.py:
     uv run browser.py google-image "keyword" -a account --size Large
-    uv run browser.py google-image "keyword" -a account -n 100 -o ./downloads
+    uv run browser.py google-image "keyword" -a account -n 100 -o ~/Downloads
 """
 
 import dataclasses
@@ -58,10 +58,20 @@ MIN_DIMENSION = {
 }
 
 
+# Time range mapping for DuckDuckGo
+DDGS_TIME_MAP = {
+    "Day": "d",
+    "Week": "w",
+    "Month": "m",
+    "Year": "y",
+}
+
+
 def search_duckduckgo_images(
     keyword: str,
     num: int = 100,
     size: str | None = None,
+    time_range: str | None = None,
 ) -> list[dict]:
     """Search images using DuckDuckGo (no browser needed).
 
@@ -71,6 +81,7 @@ def search_duckduckgo_images(
         keyword: Search query
         num: Maximum number of results
         size: Size filter (Large, Medium, Small/Icon)
+        time_range: Time filter (Day, Week, Month, Year)
 
     Returns:
         List of dicts with 'url', 'title', 'source' keys
@@ -87,6 +98,7 @@ def search_duckduckgo_images(
 
     try:
         ddgs_size = DDGS_SIZE_MAP.get(size) if size else None
+        ddgs_time = DDGS_TIME_MAP.get(time_range) if time_range else None
         min_dim = MIN_DIMENSION.get(size, 0) if size else 0
 
         # Pagination: keep fetching until we have enough images meeting size criteria
@@ -104,13 +116,19 @@ def search_duckduckgo_images(
                 # Calculate offset for pagination
                 offset = batch_num * batch_size
 
-                results = list(ddgs.images(
-                    keywords=keyword,
-                    region="wt-wt",
-                    safesearch="off",
-                    size=ddgs_size,
-                    max_results=batch_size + offset,
-                ))
+                # Build kwargs for images() call
+                images_kwargs = {
+                    "keywords": keyword,
+                    "region": "wt-wt",
+                    "safesearch": "off",
+                    "max_results": batch_size + offset,
+                }
+                if ddgs_size:
+                    images_kwargs["size"] = ddgs_size
+                if ddgs_time:
+                    images_kwargs["timelimit"] = ddgs_time
+
+                results = list(ddgs.images(**images_kwargs))
 
                 # Skip already seen results (pagination returns cumulative results)
                 new_results = results[offset:] if offset < len(results) else []
@@ -307,10 +325,14 @@ class GoogleImage:
         "headless": "Run in headless mode",
         "keep_open": "Keep browser open for N seconds",
         "workers": "Number of parallel download workers",
+        "time_range": "Time range filter (Day, Week, Month, Year)",
+        "date_from": "Custom date range start (YYYYMMDD format, e.g., 20240101) - Google only",
+        "date_to": "Custom date range end (YYYYMMDD format, e.g., 20241231) - Google only",
     }
     _cli_choices: ClassVar[dict] = {
         "size": ["4k", "fullhd", "Large", "Medium", "Icon"],
         "source": ["auto", "duckduckgo", "google"],
+        "time_range": ["Day", "Week", "Month", "Year"],
     }
     _cli_short: ClassVar[dict] = {
         "account": "a",
@@ -321,6 +343,9 @@ class GoogleImage:
         "output": "O",
         "keep_open": "k",
         "workers": "w",
+        "time_range": "t",
+        "date_from": "df",
+        "date_to": "dt",
     }
 
     # Instance fields (order matters for positional args)
@@ -328,12 +353,15 @@ class GoogleImage:
     account: str = ""  # Optional now - not needed for DuckDuckGo
     size: SizeFilter = "Large"
     download: int = 0
-    download_dir: str = "./downloads"
+    download_dir: str = "~/Downloads"
     source: str = "auto"  # auto, duckduckgo, google
     output: str | None = None
     headless: bool = True
     keep_open: int = 0
     workers: int = DEFAULT_DOWNLOAD_WORKERS
+    time_range: str | None = None  # Day, Week, Month, Year
+    date_from: str | None = None   # YYYYMMDD format (Google custom date range)
+    date_to: str | None = None     # YYYYMMDD format (Google custom date range)
 
     def execute(self, page: Page) -> list[str]:
         """Execute the Google Images search and optionally download images.
@@ -347,9 +375,39 @@ class GoogleImage:
         # Build search URL with size filter
         encoded_keyword = urllib.parse.quote(self.keyword)
         size_param = SIZE_PARAMS.get(self.size, "isz:l")
-        search_url = f"https://www.google.com/search?q={encoded_keyword}&tbm=isch&tbs={size_param}"
 
-        logger.info("Searching Google Images: '%s' (size=%s)", self.keyword, self.size)
+        # Build tbs parameter with multiple filters
+        tbs_parts = [size_param]
+
+        # Add time range filter
+        if self.time_range:
+            time_map = {"Day": "qdr:d", "Week": "qdr:w", "Month": "qdr:m", "Year": "qdr:y"}
+            if self.time_range in time_map:
+                tbs_parts.append(time_map[self.time_range])
+
+        # Add custom date range (Google format: cdr:1,cd_min:MM/DD/YYYY,cd_max:MM/DD/YYYY)
+        if self.date_from or self.date_to:
+            date_parts = ["cdr:1"]
+            if self.date_from and len(self.date_from) == 8:
+                # Convert YYYYMMDD to MM/DD/YYYY
+                date_min = f"{self.date_from[4:6]}/{self.date_from[6:8]}/{self.date_from[:4]}"
+                date_parts.append(f"cd_min:{date_min}")
+            if self.date_to and len(self.date_to) == 8:
+                # Convert YYYYMMDD to MM/DD/YYYY
+                date_max = f"{self.date_to[4:6]}/{self.date_to[6:8]}/{self.date_to[:4]}"
+                date_parts.append(f"cd_max:{date_max}")
+            tbs_parts.append(",".join(date_parts))
+
+        tbs_value = ",".join(tbs_parts)
+        search_url = f"https://www.google.com/search?q={encoded_keyword}&tbm=isch&tbs={tbs_value}"
+
+        date_info = ""
+        if self.time_range:
+            date_info = f", time={self.time_range}"
+        elif self.date_from or self.date_to:
+            date_info = f", date={self.date_from or 'any'} to {self.date_to or 'any'}"
+
+        logger.info("Searching Google Images: '%s' (size=%s%s)", self.keyword, self.size, date_info)
         page.goto(search_url)
         self._wait_for_load(page)
 
@@ -384,11 +442,18 @@ class GoogleImage:
         collected_urls = []
 
         # Tier 1: Try DuckDuckGo first (fastest, no browser needed)
-        logger.info("Trying DuckDuckGo search (no browser)...")
-        ddg_results = search_duckduckgo_images(self.keyword, self.download, self.size)
-        if ddg_results:
-            collected_urls = [r["url"] for r in ddg_results if r.get("url")]
-            logger.info("DuckDuckGo returned %d URLs", len(collected_urls))
+        # Skip DuckDuckGo if custom date range is specified (not supported)
+        has_custom_date = self.date_from or self.date_to
+        if not has_custom_date:
+            logger.info("Trying DuckDuckGo search (no browser)...")
+            ddg_results = search_duckduckgo_images(
+                self.keyword, self.download, self.size, self.time_range
+            )
+            if ddg_results:
+                collected_urls = [r["url"] for r in ddg_results if r.get("url")]
+                logger.info("DuckDuckGo returned %d URLs", len(collected_urls))
+        else:
+            logger.info("Skipping DuckDuckGo (custom date range requires Google)")
 
         # Tier 2: Fall back to Google regex extraction if DuckDuckGo fails or insufficient
         if len(collected_urls) < self.download and page:
@@ -463,17 +528,32 @@ class GoogleImage:
         - source='duckduckgo': No browser needed, fastest
         - source='google': Uses Playwright browser
         - source='auto': Try DuckDuckGo first, fallback to Google
+
+        Note: Custom date ranges (date_from/date_to) require Google (browser mode).
         """
+        # Check if custom date range is specified - requires Google
+        has_custom_date = self.date_from or self.date_to
+
         # DuckDuckGo-only mode (no browser needed)
-        if self.source == "duckduckgo" or (self.source == "auto" and self.download > 0 and not self.account):
+        # Skip DuckDuckGo if custom date range is specified (not supported)
+        if self.source == "duckduckgo" and has_custom_date:
+            logger.warning("DuckDuckGo doesn't support custom date ranges. Switching to Google...")
+            self.source = "google"
+
+        if self.source == "duckduckgo" or (self.source == "auto" and self.download > 0 and not self.account and not has_custom_date):
             logger.info("Using DuckDuckGo (no browser)")
             return self._download_images(page=None)
 
-        # Google mode or auto with account - needs browser
+        # Google mode or auto with account or custom date range - needs browser
         if not self.account:
-            logger.warning("No account specified. Use -a <account> for Google, or -S duckduckgo for no-browser mode")
-            # Try DuckDuckGo anyway
-            return self._download_images(page=None)
+            if has_custom_date:
+                logger.warning("Custom date range requires Google. Launching browser without account...")
+                # Use non-authenticated browser for Google
+                return self._run_google_without_account()
+            else:
+                logger.warning("No account specified. Use -a <account> for Google, or -S duckduckgo for no-browser mode")
+                # Try DuckDuckGo anyway
+                return self._download_images(page=None)
 
         from browser import create_authenticated_context, wait_with_browser_check
 
@@ -491,6 +571,32 @@ class GoogleImage:
                 return result
             finally:
                 context.close()
+
+    def _run_google_without_account(self) -> list[str]:
+        """Run Google Images search without authentication.
+
+        Used when custom date range is specified but no account is provided.
+        """
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=self.headless)
+            context = browser.new_context(
+                viewport={"width": 1920, "height": 1080},
+                user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            )
+            page = context.new_page()
+
+            try:
+                result = self.execute(page)
+
+                if self.keep_open > 0:
+                    logger.info("Browser open for %ds...", self.keep_open)
+                    import time
+                    time.sleep(self.keep_open)
+
+                return result
+            finally:
+                context.close()
+                browser.close()
 
     def _wait_for_load(self, page: Page, timeout: int = 5000) -> None:
         """Wait for page to load - optimized with minimal delay.

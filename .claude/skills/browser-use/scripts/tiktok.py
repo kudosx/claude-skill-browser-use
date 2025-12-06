@@ -26,10 +26,10 @@ Usage via browser.py:
     uv run browser.py tiktok-search "keyword" -n 10 -a myaccount --no-headless  # With account
 
     # Download single video
-    uv run browser.py tiktok-download "https://tiktok.com/@user/video/123" -o ./downloads
+    uv run browser.py tiktok-download "https://tiktok.com/@user/video/123" -o ~/Downloads
 
     # Search + download (use --no-headless)
-    uv run browser.py tiktok-download "keyword" --search -n 5 -o ./downloads --no-headless
+    uv run browser.py tiktok-download "keyword" --search -n 5 -o ~/Downloads --no-headless
 """
 
 import dataclasses
@@ -515,7 +515,7 @@ class TikTokDownload:
 
     # Instance fields
     url: str
-    output_dir: str = "./downloads"
+    output_dir: str = "~/Downloads"
     search: bool = False
     num: int = 5
     headless: bool = True

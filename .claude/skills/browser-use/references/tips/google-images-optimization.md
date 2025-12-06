@@ -7,30 +7,30 @@ tags: [duckduckgo, google-images, optimization, no-browser]
 
 # Image Download Optimization
 
-Tài liệu này ghi lại quá trình tối ưu hóa tải ảnh từ các nguồn khác nhau.
+This document records the process of optimizing image downloads from various sources.
 
-## Tổng quan kết quả
+## Results Overview
 
 | Method | 20 images | 100 images | Browser | Success Rate |
 |--------|-----------|------------|---------|--------------|
-| Click thumbnails (cũ) | 110s | N/A | Yes | ~100% |
+| Click thumbnails (old) | 110s | N/A | Yes | ~100% |
 | Google regex | 11s | 15s | Yes | ~98% |
-| **DuckDuckGo (mới)** | **9s** | **19s** | **No** | **~98%** |
+| **DuckDuckGo (new)** | **9s** | **19s** | **No** | **~98%** |
 
-**Cải thiện: 12x nhanh hơn, không cần browser!**
+**Improvement: 12x faster, no browser needed!**
 
 ---
 
-## Phần 1: DuckDuckGo Search (Khuyên dùng)
+## Part 1: DuckDuckGo Search (Recommended)
 
-### Tại sao DuckDuckGo?
+### Why DuckDuckGo?
 
-- **Không cần browser** - Chỉ dùng HTTP requests
-- **Không cần API key** - Hoàn toàn miễn phí
-- **Nhanh** - ~2-3s để tìm 100 URLs
-- **Hỗ trợ filters** - Size, color, type, license
+- **No browser needed** - HTTP requests only
+- **No API key required** - Completely free
+- **Fast** - ~2-3s to find 100 URLs
+- **Supports filters** - Size, color, type, license
 
-### Cài đặt
+### Installation
 
 ```bash
 uv add duckduckgo-search
@@ -58,17 +58,20 @@ def search_duckduckgo_images(keyword: str, num: int = 100, size: str = None):
 ### CLI Usage
 
 ```bash
-# DuckDuckGo only - KHÔNG CẦN BROWSER
-uv run browser.py google-image "landscape wallpaper" -n 100 -o ./downloads -S duckduckgo
+# DuckDuckGo only - NO BROWSER NEEDED
+uv run browser.py google-image "landscape wallpaper" -n 100 -o ~/Downloads -S duckduckgo
 
-# Với size filter
-uv run browser.py google-image "nature" -n 50 -o ./downloads -S duckduckgo -s Large
+# With size filter
+uv run browser.py google-image "nature" -n 50 -o ~/Downloads -S duckduckgo -s Large
 
 # 4K images (3840px+ minimum)
-uv run browser.py google-image "wallpaper" -n 20 -o ./downloads -s 4k
+uv run browser.py google-image "wallpaper" -n 20 -o ~/Downloads -s 4k
 
 # FullHD images (1920px+ minimum)
-uv run browser.py google-image "wallpaper" -n 50 -o ./downloads -s fullhd
+uv run browser.py google-image "wallpaper" -n 50 -o ~/Downloads -s fullhd
+
+# With time range filter (DuckDuckGo supports Day, Week, Month, Year)
+uv run browser.py google-image "news" -n 50 -o ~/Downloads -S duckduckgo -t Day
 ```
 
 ### Size Filter Options
@@ -81,7 +84,7 @@ uv run browser.py google-image "wallpaper" -n 50 -o ./downloads -s fullhd
 | `Medium` | 400px | Medium images |
 | `Icon` | 0px | No minimum |
 
-### Benchmark thực nghiệm
+### Experimental Benchmark
 
 **100 images (Large size):**
 ```
@@ -91,7 +94,7 @@ uv run browser.py google-image "wallpaper" -n 50 -o ./downloads -s fullhd
 23:51:53 - Downloading 100 images with 10 workers...
 23:52:09 - Downloaded 98/100 images (98%) to test_downloads
 
-Total: 19 giây cho 100 images (không cần browser)
+Total: 19 seconds for 100 images (no browser needed)
 ```
 
 **50 images (FullHD size - 1920px+):**
@@ -102,24 +105,24 @@ Total: 19 giây cho 100 images (không cần browser)
 00:26:14 - Downloading 50 images with 10 workers...
 00:27:04 - Downloaded 43/50 images (86%) to downloads
 
-Total: ~54 giây (search nhanh, download chậm do ảnh lớn hơn)
+Total: ~54 seconds (fast search, slower download due to larger images)
 ```
 
-**Note:** 4K và FullHD filters lọc theo dimension thực tế từ metadata, nên số ảnh tìm được có thể ít hơn.
+**Note:** 4K and FullHD filters check actual dimensions from metadata, so the number of images found may be less than requested.
 
 ---
 
-## Phần 2: Google Images với Regex (Fallback)
+## Part 2: Google Images with Regex (Fallback)
 
-### Khi nào dùng Google?
+### When to use Google?
 
-- DuckDuckGo không đủ kết quả
-- Cần kết quả từ Google cụ thể
-- Đã có account đăng nhập
+- DuckDuckGo doesn't return enough results
+- Need results specifically from Google
+- Already have a logged-in account
 
 ### Key Insight
 
-Google Images lưu URLs trong `AF_initDataCallback`:
+Google Images stores URLs in `AF_initDataCallback`:
 
 ```javascript
 ["https://example.com/full-size-image.jpg", 1920, 1080]
@@ -157,13 +160,21 @@ def extract_image_urls_from_source(html: str, limit: int) -> list[str]:
 ### CLI Usage
 
 ```bash
-# Google mode (cần account)
-uv run browser.py google-image "keyword" account_name -n 50 -o ./downloads -S google
+# Google mode (requires account)
+uv run browser.py google-image "keyword" -a account_name -n 50 -o ~/Downloads -S google
+
+# Google with time range filter
+uv run browser.py google-image "news" -a account_name -n 50 -o ~/Downloads -S google -t Week
+
+# Google with custom date range (YYYYMMDD format) - Google only
+uv run browser.py google-image "event photos" -a account_name -n 50 -o ~/Downloads -S google -df 20240601 -dt 20240630
 ```
+
+**Note:** Custom date range (`-df`, `-dt`) only works with Google mode because DuckDuckGo doesn't support custom date ranges.
 
 ---
 
-## Phần 3: Tiered Fallback Strategy
+## Part 3: Tiered Fallback Strategy
 
 ### Architecture
 
@@ -219,9 +230,9 @@ def _download_images(self, page: Page | None) -> list[str]:
 
 ---
 
-## Phần 4: Parallel Downloads
+## Part 4: Parallel Downloads
 
-### Tối ưu download với ThreadPoolExecutor
+### Optimizing downloads with ThreadPoolExecutor
 
 ```python
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -254,7 +265,7 @@ def download_parallel(urls: list[str], output_dir: Path, workers: int = 10):
 
 ---
 
-## Phần 5: So sánh với YouTube pattern
+## Part 5: Comparison with YouTube Pattern
 
 | Aspect | YouTube | Images |
 |--------|---------|--------|
@@ -268,23 +279,29 @@ def download_parallel(urls: list[str], output_dir: Path, workers: int = 10):
 ## CLI Commands Reference
 
 ```bash
-# DuckDuckGo - nhanh nhất, không cần browser
-uv run browser.py google-image "keyword" -n 100 -o ./downloads -S duckduckgo
+# DuckDuckGo - fastest, no browser needed
+uv run browser.py google-image "keyword" -n 100 -o ~/Downloads -S duckduckgo
 
-# Auto mode - thử DuckDuckGo trước
-uv run browser.py google-image "keyword" -n 100 -o ./downloads
+# Auto mode - tries DuckDuckGo first
+uv run browser.py google-image "keyword" -n 100 -o ~/Downloads
 
-# Google mode - cần account
-uv run browser.py google-image "keyword" account_name -n 50 -o ./downloads -S google
+# Google mode - requires account
+uv run browser.py google-image "keyword" -a account_name -n 50 -o ~/Downloads -S google
 
-# Với size filter
-uv run browser.py google-image "keyword" -n 100 -o ./downloads -S duckduckgo -s Large
+# With size filter
+uv run browser.py google-image "keyword" -n 100 -o ~/Downloads -S duckduckgo -s Large
 
 # 4K images (3840px+ minimum)
-uv run browser.py google-image "wallpaper" -n 20 -o ./downloads -s 4k
+uv run browser.py google-image "wallpaper" -n 20 -o ~/Downloads -s 4k
 
 # FullHD images (1920px+ minimum)
-uv run browser.py google-image "wallpaper" -n 50 -o ./downloads -s fullhd
+uv run browser.py google-image "wallpaper" -n 50 -o ~/Downloads -s fullhd
+
+# DuckDuckGo with time range (Day, Week, Month, Year)
+uv run browser.py google-image "news" -n 50 -o ~/Downloads -S duckduckgo -t Day
+
+# Google with custom date range (YYYYMMDD) - requires account
+uv run browser.py google-image "event" -a myaccount -n 50 -o ~/Downloads -S google -df 20240601 -dt 20240630
 ```
 
 ---
@@ -292,19 +309,21 @@ uv run browser.py google-image "wallpaper" -n 50 -o ./downloads -s fullhd
 ## Best Practices
 
 ### Search
-1. **Ưu tiên DuckDuckGo** - Không cần browser, nhanh nhất
-2. **Fallback to Google** khi cần nhiều kết quả hơn
-3. **Dùng size filter** để lọc ảnh chất lượng cao
+1. **Prefer DuckDuckGo** - No browser needed, fastest
+2. **Fallback to Google** when more results or custom date range needed
+3. **Use size filter** to get high-quality images
+4. **Time range filter** (-t) supported by both DuckDuckGo and Google
+5. **Custom date range** (-df, -dt) only supported by Google
 
 ### Download
-1. **10 workers** là sweet spot cho parallel downloads
-2. **Timeout 15s** per image để tránh stuck
-3. **Skip duplicates** bằng URL set
+1. **10 workers** is the sweet spot for parallel downloads
+2. **15s timeout** per image to avoid getting stuck
+3. **Skip duplicates** using URL set
 
 ### Error Handling
 1. **Retry failed downloads** (optional)
-2. **Log success rate** để monitor
-3. **Graceful fallback** giữa các tiers
+2. **Log success rate** for monitoring
+3. **Graceful fallback** between tiers
 
 ---
 

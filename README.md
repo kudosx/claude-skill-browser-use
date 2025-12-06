@@ -1,6 +1,6 @@
 # Skill Browser Use
 
-Claude skill for browsing websites and interacting with web pages using Playwright.
+Claude skill for browser automation, web scraping, and media downloading.
 
 ## Features
 
@@ -9,49 +9,64 @@ Claude skill for browsing websites and interacting with web pages using Playwrig
 - Screenshot, PDF export, text extraction
 - Form filling, clicking, file upload/download
 - **Image search & download** - DuckDuckGo (no browser, 12x faster) + Google fallback
-- **YouTube search & download** - yt-dlp powered (no browser, 4x faster search)
+- **YouTube search & download** - yt-dlp powered (no browser, 4x faster search) with date filtering
+- **TikTok search & download** - Playwright search + yt-dlp download
 
 ## Example Prompts
 
-### Common Usage
+### Web Scraping & Screenshots
 
 ```
-take a screenshot of https://example.com
+screenshot dantri.com and extract top news headlines
 
-extract all links from https://example.com
+take a full-page screenshot of https://github.com/trending
 
-fill the search box on google.com with "hello world" and press Enter
+extract all product prices from https://amazon.com/deals
 
-download the PDF from https://example.com/document.pdf
+get the text content of all h2 headings from https://news.ycombinator.com
+
+save https://arxiv.org/pdf/2508.08322v1 as PDF
 ```
 
 ### Image Search & Download
 
 ```
-download 100 images of "landscape wallpaper"
+download 100 "sunset beach" wallpapers in 4K resolution
 
-download 50 large images of "nature photography"
+download 50 "minimalist desk setup" images for inspiration
 
-download 20 4k images of "wallpaper" to ./downloads
+get 30 "cute dog" photos in fullhd quality
 
-download 50 fullhd images of "nature" to ./downloads
-
-search and download 100 "beautiful city" images to ./downloads
+download "vintage car" images from last month
 ```
 
-Size options: `4k` (3840px+), `fullhd` (1920px+), `Large` (1000px+), `Medium` (400px+), `Icon`
+Size options: `4k` (3840px+), `fullhd` (1920px+), `Large` (1000px+), `Medium` (400px+)
 
 ### YouTube
 
 ```
-search YouTube for "python tutorial" and get the top 10 results
+find top 10 "machine learning tutorial" videos under 20 minutes
 
-download YouTube video https://youtube.com/watch?v=... in 720p
+download the audio from this YouTube video as mp3
 
-download audio only from YouTube video as mp3
+search YouTube for "cooking recipes" videos uploaded this week
 
-search and download 5 "lofi music" videos from YouTube
+download 5 "lo-fi beats" videos between 30-60 minutes for studying
+
+find "react tutorial" videos from 2024
 ```
+
+### TikTok
+
+```
+search TikTok for trending "#lifehacks" videos
+
+download this TikTok video: https://tiktok.com/@user/video/123
+
+find and download 10 "#productivity" TikTok videos
+```
+
+Note: TikTok requires `--no-headless` mode due to bot detection.
 
 ## Documentation
 
@@ -62,4 +77,5 @@ search and download 5 "lofi music" videos from YouTube
 
 - [Google Images Optimization](.claude/skills/browser-use/references/tips/google-images-optimization.md) - DuckDuckGo + parallel downloads (12x faster)
 - [YouTube Optimization](.claude/skills/browser-use/references/tips/youtube-optimization.md) - yt-dlp ytsearch (4x faster)
+- [TikTok Optimization](.claude/skills/browser-use/references/tips/tiktok-optimization.md) - Anti-detection and best practices
 - [Browser Automation Best Practices](.claude/skills/browser-use/references/tips/browser-automation.md) - When to avoid browsers

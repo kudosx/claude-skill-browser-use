@@ -38,11 +38,26 @@ logger = logging.getLogger(__name__)
 ARIA2C_AVAILABLE = shutil.which("aria2c") is not None
 
 
-def _search_ytdlp_fast(keyword: str, num: int = 10, min_duration: int | None = None, max_duration: int | None = None) -> list[dict] | None:
+def _search_ytdlp_fast(
+    keyword: str,
+    num: int = 10,
+    min_duration: int | None = None,
+    max_duration: int | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> list[dict] | None:
     """Ultra-fast YouTube search using yt-dlp ytsearch (no browser, no extra library).
 
     This is the fastest method (~1.6s vs 11s for full extraction).
     Uses --flat-playlist to skip full video info extraction.
+
+    Args:
+        keyword: Search query
+        num: Number of results to return
+        min_duration: Minimum video duration in minutes
+        max_duration: Maximum video duration in minutes
+        date_from: Filter videos uploaded after this date (YYYYMMDD format)
+        date_to: Filter videos uploaded before this date (YYYYMMDD format)
 
     Returns None if yt-dlp is not available or search fails.
     """
@@ -50,28 +65,33 @@ def _search_ytdlp_fast(keyword: str, num: int = 10, min_duration: int | None = N
     min_dur = int(min_duration) if min_duration else None
     max_dur = int(max_duration) if max_duration else None
 
-    # Fetch more results to account for duration filtering
-    # With duration filter, we need more results since many will be filtered out
-    fetch_num = num * 5 if (min_dur or max_dur) else num
+    # Fetch more results to account for duration/date filtering
+    # With filters, we need more results since many will be filtered out
+    has_filters = min_dur or max_dur or date_from or date_to
+    fetch_num = num * 5 if has_filters else num
     fetch_num = min(fetch_num, 50)  # yt-dlp reasonable limit
 
+    # Note: --flat-playlist is faster but doesn't return upload_date
+    # We need full extraction to get dates, which is slower (~10s vs ~1.5s)
+    # but necessary for date filtering and date display
     cmd = [
         "yt-dlp",
         f"ytsearch{fetch_num}:{keyword}",
         "--dump-json",
-        "--flat-playlist",      # Skip full extraction (7x faster)
         "--skip-download",
         "--quiet",
         "--no-warnings",
         "--ignore-errors",
     ]
+    # Note: --dateafter/--datebefore don't work well with ytsearch
+    # We do post-filtering by date instead
 
     try:
         result = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
-            timeout=30,
+            timeout=120,  # Full extraction needs more time than flat-playlist
         )
 
         if result.returncode != 0:
@@ -111,6 +131,16 @@ def _search_ytdlp_fast(keyword: str, num: int = 10, min_duration: int | None = N
                 # Skip videos without duration when filtering
                 continue
 
+            # Filter by date if specified (upload_date is YYYYMMDD string)
+            raw_upload_date = v.get("upload_date", "")
+            if date_from or date_to:
+                if not raw_upload_date:
+                    continue  # Skip videos without upload date when filtering
+                if date_from and raw_upload_date < date_from:
+                    continue
+                if date_to and raw_upload_date > date_to:
+                    continue
+
             video_id = v.get("id", "")
             url = v.get("url") or f"https://www.youtube.com/watch?v={video_id}"
 
@@ -128,12 +158,18 @@ def _search_ytdlp_fast(keyword: str, num: int = 10, min_duration: int | None = N
             else:
                 views = ""
 
+            # Format upload date from YYYYMMDD to YYYY-MM-DD
+            upload_date_fmt = ""
+            if raw_upload_date and len(raw_upload_date) == 8:
+                upload_date_fmt = f"{raw_upload_date[:4]}-{raw_upload_date[4:6]}-{raw_upload_date[6:8]}"
+
             results.append({
                 "url": url,
                 "title": v.get("title", ""),
                 "channel": v.get("channel") or v.get("uploader", ""),
                 "duration": duration_str,
                 "views": views,
+                "date": upload_date_fmt,
             })
 
             if len(results) >= num:
@@ -153,8 +189,18 @@ def _search_ytdlp_fast(keyword: str, num: int = 10, min_duration: int | None = N
         return None
 
 
-def _search_youtube_fast(keyword: str, num: int = 10, min_duration: int | None = None, max_duration: int | None = None) -> list[dict] | None:
+def _search_youtube_fast(
+    keyword: str,
+    num: int = 10,
+    min_duration: int | None = None,
+    max_duration: int | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> list[dict] | None:
     """Fast YouTube search using youtube-search-python (no browser needed).
+
+    Note: youtube-search-python does not support date filtering directly.
+    Date filtering is done post-search by parsing upload dates when available.
 
     Returns None if the library is not available or search fails.
     This is ~10x faster than Playwright-based search.
@@ -166,8 +212,9 @@ def _search_youtube_fast(keyword: str, num: int = 10, min_duration: int | None =
         return None
 
     try:
-        # Fetch more results to account for duration filtering
-        fetch_num = num * 3 if (min_duration or max_duration) else num
+        # Fetch more results to account for duration/date filtering
+        has_filters = min_duration or max_duration or date_from or date_to
+        fetch_num = num * 3 if has_filters else num
         search = VideosSearch(keyword, limit=min(fetch_num, 50))  # API limit is 50
         raw_results = search.result().get("result", [])
 
@@ -188,12 +235,15 @@ def _search_youtube_fast(keyword: str, num: int = 10, min_duration: int | None =
                 continue
 
             video_id = v.get("id", "")
+            # Get published time (e.g., "2 days ago", "1 year ago")
+            published_time = v.get("publishedTime", "")
             results.append({
                 "url": f"https://www.youtube.com/watch?v={video_id}",
                 "title": v.get("title", ""),
                 "channel": v.get("channel", {}).get("name", ""),
                 "duration": duration_str,
                 "views": v.get("viewCount", {}).get("short", ""),
+                "date": published_time,
             })
 
             if len(results) >= num:
@@ -234,6 +284,18 @@ def parse_duration_to_minutes(duration_str: str) -> float | None:
 # Quality options for video download
 QualityOption = Literal["best", "1080p", "720p", "480p", "360p", "audio"]
 
+# Upload date filter options
+UploadDateOption = Literal["hour", "today", "week", "month", "year", None]
+
+# YouTube sp parameter values for upload date filters
+UPLOAD_DATE_PARAMS = {
+    "hour": "EgIIAQ%3D%3D",
+    "today": "EgIIAg%3D%3D",
+    "week": "EgIIAw%3D%3D",
+    "month": "EgIIBA%3D%3D",
+    "year": "EgIIBQ%3D%3D",
+}
+
 # Format strings for yt-dlp - prefer mp4/m4a over webm for compatibility
 QUALITY_FORMATS = {
     "best": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best",
@@ -270,14 +332,22 @@ class YouTubeSearch:
         "headless": "Run in headless mode",
         "min_duration": "Minimum video duration in minutes",
         "max_duration": "Maximum video duration in minutes",
+        "upload_date": "Filter by upload date (hour, today, week, month, year)",
+        "date_from": "Custom date range start (YYYYMMDD format, e.g., 20240101)",
+        "date_to": "Custom date range end (YYYYMMDD format, e.g., 20241231)",
     }
-    _cli_choices: ClassVar[dict] = {}
+    _cli_choices: ClassVar[dict] = {
+        "upload_date": ["hour", "today", "week", "month", "year"],
+    }
     _cli_short: ClassVar[dict] = {
         "num": "n",
         "output": "o",
         "screenshot": "s",
         "min_duration": "min",
         "max_duration": "max",
+        "upload_date": "t",
+        "date_from": "df",
+        "date_to": "dt",
     }
 
     # Instance fields (order matters for positional args)
@@ -288,6 +358,9 @@ class YouTubeSearch:
     headless: bool = True
     min_duration: int | None = None
     max_duration: int | None = None
+    upload_date: str | None = None
+    date_from: str | None = None  # YYYYMMDD format
+    date_to: str | None = None    # YYYYMMDD format
 
     def execute(self, page: Page) -> list[dict]:
         """Execute the YouTube search on the given page.
@@ -302,22 +375,28 @@ class YouTubeSearch:
         encoded_keyword = urllib.parse.quote(self.keyword)
         search_url = f"https://www.youtube.com/results?search_query={encoded_keyword}"
 
-        # Add duration filter via URL parameter (sp parameter)
-        # Short (< 4 min): EgIYAQ%3D%3D
-        # Medium (4-20 min): EgIYAw%3D%3D
-        # Long (> 20 min): EgIYAg%3D%3D
-        min_dur = int(self.min_duration) if self.min_duration else None
-        max_dur = int(self.max_duration) if self.max_duration else None
-        if min_dur and max_dur:
-            if min_dur >= 4 and max_dur <= 20:
-                search_url += "&sp=EgIYAw%3D%3D"  # Medium (4-20 min)
-                logger.info("Using YouTube URL filter: 4-20 minutes")
-            elif max_dur <= 4:
-                search_url += "&sp=EgIYAQ%3D%3D"  # Short (< 4 min)
-                logger.info("Using YouTube URL filter: < 4 minutes")
-            elif min_dur >= 20:
-                search_url += "&sp=EgIYAg%3D%3D"  # Long (> 20 min)
-                logger.info("Using YouTube URL filter: > 20 minutes")
+        # Add upload date filter via URL parameter (sp parameter)
+        # These take priority over duration filters (can't easily combine in YouTube)
+        if self.upload_date and self.upload_date in UPLOAD_DATE_PARAMS:
+            search_url += f"&sp={UPLOAD_DATE_PARAMS[self.upload_date]}"
+            logger.info("Using YouTube URL filter: upload date = %s", self.upload_date)
+        else:
+            # Add duration filter via URL parameter (sp parameter)
+            # Short (< 4 min): EgIYAQ%3D%3D
+            # Medium (4-20 min): EgIYAw%3D%3D
+            # Long (> 20 min): EgIYAg%3D%3D
+            min_dur = int(self.min_duration) if self.min_duration else None
+            max_dur = int(self.max_duration) if self.max_duration else None
+            if min_dur and max_dur:
+                if min_dur >= 4 and max_dur <= 20:
+                    search_url += "&sp=EgIYAw%3D%3D"  # Medium (4-20 min)
+                    logger.info("Using YouTube URL filter: 4-20 minutes")
+                elif max_dur <= 4:
+                    search_url += "&sp=EgIYAQ%3D%3D"  # Short (< 4 min)
+                    logger.info("Using YouTube URL filter: < 4 minutes")
+                elif min_dur >= 20:
+                    search_url += "&sp=EgIYAg%3D%3D"  # Long (> 20 min)
+                    logger.info("Using YouTube URL filter: > 20 minutes")
 
         logger.info("Searching YouTube: '%s'", self.keyword)
         page.goto(search_url)
@@ -415,12 +494,16 @@ class YouTubeSearch:
                     const durationElem = elem.querySelector('span.ytd-thumbnail-overlay-time-status-renderer');
                     const metadataSpans = elem.querySelectorAll('#metadata-line span');
 
+                    // Date is usually the second span in metadata-line (e.g., "2 days ago")
+                    const date = metadataSpans.length > 1 ? metadataSpans[1].textContent.trim() : '';
+
                     videos.push({
                         href: href,
                         title: title ? title.trim() : '',
                         channel: channelElem ? channelElem.textContent.trim() : '',
                         duration: durationElem ? durationElem.textContent.trim() : '',
-                        views: metadataSpans.length > 0 ? metadataSpans[0].textContent.trim() : ''
+                        views: metadataSpans.length > 0 ? metadataSpans[0].textContent.trim() : '',
+                        date: date
                     });
                 });
                 return videos;
@@ -444,6 +527,7 @@ class YouTubeSearch:
                 "channel": v.get("channel", ""),
                 "duration": v.get("duration", ""),
                 "views": v.get("views", ""),
+                "date": v.get("date", ""),
             })
 
         return results
@@ -456,9 +540,12 @@ class YouTubeSearch:
         2. youtube-search-python (fast, ~2-3s, no browser)
         3. Playwright browser (slowest, ~6-10s, most reliable)
         """
-        logger.info("Starting YouTube search for: '%s' (num=%d, duration=%s-%s min)",
+        date_info = ""
+        if self.date_from or self.date_to:
+            date_info = f", date={self.date_from or 'any'} to {self.date_to or 'any'}"
+        logger.info("Starting YouTube search for: '%s' (num=%d, duration=%s-%s min%s)",
                     self.keyword, self.num,
-                    self.min_duration or "any", self.max_duration or "any")
+                    self.min_duration or "any", self.max_duration or "any", date_info)
 
         # Try fastest method first: yt-dlp ytsearch
         results = _search_ytdlp_fast(
@@ -466,6 +553,8 @@ class YouTubeSearch:
             num=self.num,
             min_duration=self.min_duration,
             max_duration=self.max_duration,
+            date_from=self.date_from,
+            date_to=self.date_to,
         )
         if results:
             self._save_results(results)
@@ -477,6 +566,8 @@ class YouTubeSearch:
             num=self.num,
             min_duration=self.min_duration,
             max_duration=self.max_duration,
+            date_from=self.date_from,
+            date_to=self.date_to,
         )
         if results:
             self._save_results(results)
@@ -603,6 +694,8 @@ class YouTubeDownload:
         "max_duration": "Maximum video duration in minutes",
         "parallel": "Number of parallel downloads (default: 3)",
         "concurrent_fragments": "Concurrent fragment downloads per video (default: 4)",
+        "date_from": "Custom date range start (YYYYMMDD format, e.g., 20240101)",
+        "date_to": "Custom date range end (YYYYMMDD format, e.g., 20241231)",
     }
     _cli_choices: ClassVar[dict] = {
         "quality": ["best", "1080p", "720p", "480p", "360p", "audio"],
@@ -617,6 +710,8 @@ class YouTubeDownload:
         "max_duration": "max",
         "parallel": "p",
         "concurrent_fragments": "N",
+        "date_from": "df",
+        "date_to": "dt",
     }
 
     # Instance fields
@@ -631,6 +726,8 @@ class YouTubeDownload:
     max_duration: int | None = None
     parallel: int = 3
     concurrent_fragments: int = 8  # Higher = faster for DASH/HLS streams
+    date_from: str | None = None  # YYYYMMDD format
+    date_to: str | None = None    # YYYYMMDD format
 
     def run(self) -> list[str]:
         """Run the download and return list of downloaded files."""
@@ -649,6 +746,8 @@ class YouTubeDownload:
                 num=self.num,
                 min_duration=self.min_duration,
                 max_duration=self.max_duration,
+                date_from=self.date_from,
+                date_to=self.date_to,
             )
 
             # Fallback to youtube-search-python
@@ -658,6 +757,8 @@ class YouTubeDownload:
                     num=self.num,
                     min_duration=self.min_duration,
                     max_duration=self.max_duration,
+                    date_from=self.date_from,
+                    date_to=self.date_to,
                 )
 
             # Final fallback to Playwright browser
@@ -669,6 +770,8 @@ class YouTubeDownload:
                     headless=self.headless,
                     min_duration=self.min_duration,
                     max_duration=self.max_duration,
+                    date_from=self.date_from,
+                    date_to=self.date_to,
                 )
                 results = searcher.run()
 

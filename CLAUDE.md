@@ -36,19 +36,19 @@ uv run browser.py create-login https://example.com --account myaccount
 uv run browser.py accounts
 
 # Google Images (DuckDuckGo - no browser needed, fastest)
-uv run browser.py google-image "keyword" -n 100 -o ./downloads  # Auto mode (DuckDuckGo first)
-uv run browser.py google-image "keyword" -n 100 -o ./downloads -S duckduckgo  # DuckDuckGo only
-uv run browser.py google-image "keyword" -n 100 -o ./downloads -S duckduckgo -s Large  # With size filter
-uv run browser.py google-image "keyword" -n 20 -o ./downloads -s 4k  # 4K images (3840px+)
-uv run browser.py google-image "keyword" -n 50 -o ./downloads -s fullhd  # FullHD images (1920px+)
-uv run browser.py google-image "keyword" -a myaccount -n 50 -o ./downloads -S google  # Google mode (needs account)
+uv run browser.py google-image "keyword" -n 100 -o ~/Downloads  # Auto mode (DuckDuckGo first)
+uv run browser.py google-image "keyword" -n 100 -o ~/Downloads -S duckduckgo  # DuckDuckGo only
+uv run browser.py google-image "keyword" -n 100 -o ~/Downloads -S duckduckgo -s Large  # With size filter
+uv run browser.py google-image "keyword" -n 20 -o ~/Downloads -s 4k  # 4K images (3840px+)
+uv run browser.py google-image "keyword" -n 50 -o ~/Downloads -s fullhd  # FullHD images (1920px+)
+uv run browser.py google-image "keyword" -a myaccount -n 50 -o ~/Downloads -S google  # Google mode (needs account)
 
 # YouTube (with duration filtering)
 uv run browser.py youtube-search "keyword" -n 10
 uv run browser.py youtube-search "keyword" -n 5 -min 4 -max 20  # 4-20 min videos only
-uv run browser.py youtube-download "https://youtube.com/watch?v=..." -o ./downloads -q 720p
-uv run browser.py youtube-download "keyword" --search -n 5 -o ./downloads
-uv run browser.py youtube-download "keyword" --search -n 5 -min 4 -max 20 -o ./downloads
+uv run browser.py youtube-download "https://youtube.com/watch?v=..." -o ~/Downloads -q 720p
+uv run browser.py youtube-download "keyword" --search -n 5 -o ~/Downloads
+uv run browser.py youtube-download "keyword" --search -n 5 -min 4 -max 20 -o ~/Downloads
 
 # TikTok (uses Playwright for search, yt-dlp for download)
 # Note: Use --no-headless for search - TikTok blocks headless browsers
@@ -57,9 +57,9 @@ uv run browser.py tiktok-login -a mytiktok -w 180  # Wait 3 min for login
 uv run browser.py tiktok-search "keyword" -n 10 --no-headless
 uv run browser.py tiktok-search "#dance" -n 5 --no-headless  # Search by hashtag
 uv run browser.py tiktok-search "keyword" -n 10 -a mytiktok --no-headless  # With account
-uv run browser.py tiktok-download "https://tiktok.com/@user/video/123" -o ./downloads
-uv run browser.py tiktok-download "keyword" --search -n 5 -o ./downloads --no-headless
-uv run browser.py tiktok-download "#funny" --search -n 10 -o ./downloads -p 3 --no-headless
+uv run browser.py tiktok-download "https://tiktok.com/@user/video/123" -o ~/Downloads
+uv run browser.py tiktok-download "keyword" --search -n 5 -o ~/Downloads --no-headless
+uv run browser.py tiktok-download "#funny" --search -n 10 -o ~/Downloads -p 3 --no-headless
 ```
 
 ## Architecture
