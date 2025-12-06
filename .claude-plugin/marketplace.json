@@ -1,0 +1,22 @@
+{
+  "name": "browser-use",
+  "owner": {
+    "name": "Kudosx",
+    "email": ""
+  },
+  "metadata": {
+    "description": "Web scraping, screenshots, form filling, file downloads/uploads, Google/DuckDuckGo image search, YouTube video downloading, and TikTok video downloading",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "browser-use",
+      "description": "Browser automation skill for web scraping, screenshots, form filling, file downloads/uploads, Google Images scraping, YouTube video downloading, and TikTok video downloading",
+      "source": "./",
+      "strict": false,
+      "skills": [
+        "./skills/browser-use"
+      ]
+    }
+  ]
+}
