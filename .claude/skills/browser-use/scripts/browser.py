@@ -449,15 +449,56 @@ def extract(url: str, selector: str, attribute: str = "src", all_matches: bool =
 
 
 def pdf(url: str, output: str = "page.pdf") -> None:
-    """Save a page as PDF."""
+    """Save a page as PDF or download if URL is a direct PDF link."""
+    import requests
+
+    # Expand ~ in output path
+    output = str(Path(output).expanduser())
+
+    # Check if URL is a direct PDF link
+    if url.lower().endswith('.pdf') or '/pdf/' in url.lower():
+        try:
+            logger.info("Downloading PDF directly from URL...")
+            response = requests.get(url, timeout=60, stream=True)
+            response.raise_for_status()
+
+            with open(output, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
+
+            logger.info("PDF saved to: %s", output)
+            return
+        except Exception as e:
+            logger.warning("Direct download failed (%s), trying browser...", e)
+
+    # Use browser to render page as PDF
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        page = browser.new_page(viewport={"width": 1920, "height": 1080})
-        page.goto(url)
-        wait_for_page_load(page)
-        page.pdf(path=output)
-        logger.info("PDF saved to: %s", output)
-        browser.close()
+        context = browser.new_context(viewport={"width": 1920, "height": 1080}, accept_downloads=True)
+        page = context.new_page()
+
+        try:
+            page.goto(url)
+            wait_for_page_load(page)
+            page.pdf(path=output)
+            logger.info("PDF saved to: %s", output)
+        except Exception as e:
+            # Handle case where navigation triggers download
+            if "Download is starting" in str(e):
+                logger.info("URL triggers download, using direct download...")
+                context.close()
+                browser.close()
+                # Retry with requests
+                response = requests.get(url, timeout=60, stream=True)
+                response.raise_for_status()
+                with open(output, 'wb') as f:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        f.write(chunk)
+                logger.info("PDF saved to: %s", output)
+                return
+            raise
+        finally:
+            browser.close()
 
 
 def download(url: str, click_selector: str, output_dir: str = ".", account: str | None = None, channel: str | None = None, timeout: int = 30000) -> str | None:

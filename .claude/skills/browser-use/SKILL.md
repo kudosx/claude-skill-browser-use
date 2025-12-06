@@ -32,7 +32,7 @@ uv run browser.py links https://example.com
 uv run browser.py pdf https://example.com -o page.pdf
 
 # Download a file by clicking a download link
-uv run browser.py download https://example.com/downloads "a.download-btn" -o ./downloads
+uv run browser.py download https://example.com/downloads "a.download-btn" -o ~/Downloads
 
 # Upload file(s) to a page
 uv run browser.py upload https://example.com/upload "input[type=file]" myfile.pdf
@@ -67,17 +67,17 @@ uv run browser.py download-from-gallery \
   "div[data-id] img" \
   "img[jsname='kn3ccd']" \
   -n 100 \
-  -o ./downloads \
+  -o ~/Downloads \
   -a myaccount
 
 # Search Google Images with size filter
-uv run browser.py google-image "landscape wallpaper" -n 50 -o ./downloads -s Large
+uv run browser.py google-image "landscape wallpaper" -n 50 -o ~/Downloads -s Large
 
 # Download 4K images (3840px+ minimum)
-uv run browser.py google-image "wallpaper" -n 20 -o ./downloads -s 4k
+uv run browser.py google-image "wallpaper" -n 20 -o ~/Downloads -s 4k
 
 # Download FullHD images (1920px+ minimum)
-uv run browser.py google-image "wallpaper" -n 50 -o ./downloads -s fullhd
+uv run browser.py google-image "wallpaper" -n 50 -o ~/Downloads -s fullhd
 ```
 
 ### Google Images Size Filters
@@ -95,7 +95,7 @@ Google URL params (used internally):
 
 ## YouTube Commands
 
-Search and download YouTube videos with duration filtering:
+Search and download YouTube videos with duration and date filtering:
 
 ```bash
 cd .claude/skills/browser-use/scripts
@@ -107,28 +107,42 @@ uv run browser.py youtube-search "lofi music" -n 5 -o results.json -s screenshot
 # Search with duration filter (4-20 minutes)
 uv run browser.py youtube-search "lofi music" -n 5 -min 4 -max 20
 
+# Search videos from the last week
+uv run browser.py youtube-search "news" -n 10 -t week
+
+# Search with custom date range (YYYYMMDD format)
+uv run browser.py youtube-search "tutorial" -n 10 -df 20240101 -dt 20241231
+
 # Download a single video by URL
-uv run browser.py youtube-download "https://www.youtube.com/watch?v=dQw4w9WgXcQ" -o ./downloads
+uv run browser.py youtube-download "https://www.youtube.com/watch?v=dQw4w9WgXcQ" -o ~/Downloads
 
 # Download with quality options
-uv run browser.py youtube-download "https://youtube.com/watch?v=..." -q 720p -o ./downloads
-uv run browser.py youtube-download "https://youtube.com/watch?v=..." -q 1080p -o ./downloads
+uv run browser.py youtube-download "https://youtube.com/watch?v=..." -q 720p -o ~/Downloads
+uv run browser.py youtube-download "https://youtube.com/watch?v=..." -q 1080p -o ~/Downloads
 
 # Download audio only (mp3)
 uv run browser.py youtube-download "https://youtube.com/watch?v=..." -a -o ./music
 
 # Search and download in one command
-uv run browser.py youtube-download "lofi hip hop" --search -o ./downloads
-uv run browser.py youtube-download "python tutorial" --search -n 3 -o ./downloads
+uv run browser.py youtube-download "lofi hip hop" --search -o ~/Downloads
+uv run browser.py youtube-download "python tutorial" --search -n 3 -o ~/Downloads
 
 # Search and download with duration filter (4-20 min videos only)
-uv run browser.py youtube-download "lofi music" --search -n 5 -min 4 -max 20 -o ./downloads
+uv run browser.py youtube-download "lofi music" --search -n 5 -min 4 -max 20 -o ~/Downloads
+
+# Search and download videos from a date range
+uv run browser.py youtube-download "tutorial" --search -n 5 -df 20240101 -dt 20241231 -o ~/Downloads
 ```
 
 ### YouTube Duration Filters
 - `-min N` - Minimum duration in minutes
 - `-max N` - Maximum duration in minutes
 - Filters use YouTube URL parameters for speed, with Python-side validation as backup
+
+### YouTube Date Filters
+- `-t, --upload-date` - Filter by upload date: `hour`, `today`, `week`, `month`, `year`
+- `-df, --date-from` - Custom date range start (YYYYMMDD format, e.g., 20240101)
+- `-dt, --date-to` - Custom date range end (YYYYMMDD format, e.g., 20241231)
 
 ### YouTube Quality Options
 - `best` - Best available quality (default)
@@ -146,7 +160,46 @@ uv run browser.py youtube-download "lofi music" --search -n 5 -min 4 -max 20 -o 
     "title": "Video Title",
     "channel": "Channel Name",
     "duration": "10:30",
-    "views": "1.2M views"
+    "views": "1.2M views",
+    "date": "2024-12-01"
+  }
+]
+```
+
+## TikTok Commands
+
+**IMPORTANT:** TikTok blocks headless browsers. Use `--no-headless` for search operations.
+
+```bash
+cd .claude/skills/browser-use/scripts
+
+# Login and save session for authenticated operations
+uv run browser.py tiktok-login -a mytiktok
+uv run browser.py tiktok-login -a mytiktok -w 180  # Extended wait for 2FA
+
+# Search videos (--no-headless required for TikTok)
+uv run browser.py tiktok-search "keyword" -n 10 --no-headless
+uv run browser.py tiktok-search "#dance" -n 5 --no-headless  # By hashtag
+uv run browser.py tiktok-search "cooking" -n 10 -a mytiktok --no-headless  # With account
+
+# Download single video
+uv run browser.py tiktok-download "https://tiktok.com/@user/video/123" -o ~/Downloads
+
+# Search and download
+uv run browser.py tiktok-download "funny cats" --search -n 5 -o ~/Downloads --no-headless
+uv run browser.py tiktok-download "#cooking" --search -n 10 -o ~/Downloads -p 3 --no-headless
+```
+
+### TikTok Search Output Format
+```json
+[
+  {
+    "url": "https://www.tiktok.com/@user/video/123456789",
+    "title": "Video description...",
+    "author": "username",
+    "views": "1.2M",
+    "likes": "50K",
+    "date": "2d ago"
   }
 ]
 ```

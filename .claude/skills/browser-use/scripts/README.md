@@ -33,6 +33,9 @@ uv run browser.py <command> [options]
 | `google-image` | Search & download images (DuckDuckGo/Google) |
 | `youtube-search` | Search YouTube and get video URLs |
 | `youtube-download` | Download YouTube videos using yt-dlp |
+| `tiktok-login` | Login to TikTok and save session |
+| `tiktok-search` | Search TikTok videos by keyword/hashtag |
+| `tiktok-download` | Download TikTok videos using yt-dlp |
 
 ### `create-login` - Save Login Session
 
@@ -261,7 +264,7 @@ uv run browser.py download-from-gallery \
   "div[data-id] img" \
   "img[jsname='kn3ccd']" \
   -n 100 \
-  -o ./downloads \
+  -o ~/Downloads \
   -a myaccount
 ```
 
@@ -292,32 +295,41 @@ uv run browser.py google-image <keyword> [options]
   - `Medium` - 400px minimum dimension
   - `Icon` - No minimum
 - `--download, -n` - Number of images to download (default: 0 = no download)
-- `--download-dir, -o` - Directory to save downloaded images (default: ./downloads)
+- `--download-dir, -o` - Directory to save downloaded images (default: ~/Downloads)
 - `--source, -S` - Image source: `auto`, `duckduckgo`, `google` (default: auto)
 - `--output, -O` - Screenshot output path
 - `--no-headless` - Show browser window
 - `--keep-open, -k` - Keep browser open for N seconds
 - `--workers, -w` - Number of parallel download workers (default: 10)
+- `--time-range, -t` - Time range filter: `Day`, `Week`, `Month`, `Year`
+- `--date-from, -df` - Custom date range start (YYYYMMDD format) - Google only
+- `--date-to, -dt` - Custom date range end (YYYYMMDD format) - Google only
 
 **Examples:**
 ```bash
 # DuckDuckGo mode - fastest, no browser needed
-uv run browser.py google-image "landscape wallpaper" -n 100 -o ./downloads
+uv run browser.py google-image "landscape wallpaper" -n 100 -o ~/Downloads
 
 # DuckDuckGo with size filter
-uv run browser.py google-image "nature" -n 50 -o ./downloads -S duckduckgo -s Large
+uv run browser.py google-image "nature" -n 50 -o ~/Downloads -S duckduckgo -s Large
 
 # Download 4K images (3840px+ minimum)
-uv run browser.py google-image "wallpaper" -n 20 -o ./downloads -s 4k
+uv run browser.py google-image "wallpaper" -n 20 -o ~/Downloads -s 4k
 
 # Download FullHD images (1920px+ minimum)
-uv run browser.py google-image "wallpaper" -n 50 -o ./downloads -s fullhd
+uv run browser.py google-image "wallpaper" -n 50 -o ~/Downloads -s fullhd
 
 # Google mode - requires account
-uv run browser.py google-image "keyword" -a myaccount -n 50 -o ./downloads -S google
+uv run browser.py google-image "keyword" -a myaccount -n 50 -o ~/Downloads -S google
 
 # Auto mode (default) - tries DuckDuckGo first, falls back to Google
-uv run browser.py google-image "keyword" -n 100 -o ./downloads
+uv run browser.py google-image "keyword" -n 100 -o ~/Downloads
+
+# DuckDuckGo with time range filter
+uv run browser.py google-image "news" -n 50 -o ~/Downloads -S duckduckgo -t Day
+
+# Google with custom date range (YYYYMMDD format)
+uv run browser.py google-image "event photos" -a myaccount -n 50 -o ~/Downloads -S google -df 20240601 -dt 20240630
 ```
 
 **Source Options:**
@@ -348,6 +360,9 @@ uv run browser.py youtube-search <keyword> [options]
 - `--screenshot, -s` - Screenshot output path
 - `--min-duration, -min` - Minimum video duration in minutes
 - `--max-duration, -max` - Maximum video duration in minutes
+- `--upload-date, -t` - Filter by upload date: `hour`, `today`, `week`, `month`, `year`
+- `--date-from, -df` - Custom date range start (YYYYMMDD format, e.g., 20240101)
+- `--date-to, -dt` - Custom date range end (YYYYMMDD format, e.g., 20241231)
 - `--no-headless` - Show browser window
 
 **Example:**
@@ -363,6 +378,12 @@ uv run browser.py youtube-search "coding music" -s search.png
 
 # Search with duration filter (4-20 minutes only)
 uv run browser.py youtube-search "lofi music" -n 10 -min 4 -max 20
+
+# Search videos from the last week
+uv run browser.py youtube-search "news" -n 10 -t week
+
+# Search videos from a custom date range
+uv run browser.py youtube-search "tutorial" -n 10 -df 20240101 -dt 20241231
 ```
 
 **Output Format:**
@@ -373,7 +394,8 @@ uv run browser.py youtube-search "lofi music" -n 10 -min 4 -max 20
     "title": "Video Title",
     "channel": "Channel Name",
     "duration": "10:30",
-    "views": "1.2M views"
+    "views": "1.2M views",
+    "date": "2024-12-01"
   }
 ]
 ```
@@ -397,7 +419,10 @@ uv run browser.py youtube-download <url> [options]
 - `--num, -n` - Number of videos to download with `--search` (default: 1)
 - `--min-duration, -min` - Minimum video duration in minutes (with `--search`)
 - `--max-duration, -max` - Maximum video duration in minutes (with `--search`)
+- `--date-from, -df` - Custom date range start (YYYYMMDD format, with `--search`)
+- `--date-to, -dt` - Custom date range end (YYYYMMDD format, with `--search`)
 - `--parallel, -p` - Number of parallel downloads (default: 3)
+- `--concurrent-fragments, -N` - Concurrent fragment downloads per video (default: 8)
 
 **Examples:**
 ```bash
@@ -418,6 +443,9 @@ uv run browser.py youtube-download "lofi music" --search -n 5 -o ./music
 
 # Search and download with duration filter (4-20 min videos only)
 uv run browser.py youtube-download "lofi music" --search -n 5 -min 4 -max 20 -o ./music
+
+# Search and download videos from a date range
+uv run browser.py youtube-download "tutorial" --search -n 5 -df 20240101 -dt 20241231 -o ./videos
 ```
 
 **Quality Options:**
@@ -429,6 +457,116 @@ uv run browser.py youtube-download "lofi music" --search -n 5 -min 4 -max 20 -o 
 | `480p` | 480p or lower |
 | `360p` | 360p or lower |
 | `audio` | Best audio only |
+
+---
+
+## TikTok Commands
+
+**IMPORTANT:** TikTok heavily blocks headless browsers. Use `--no-headless` for search operations.
+
+### `tiktok-login` - Login and Save Session
+
+Login to TikTok interactively and save the session for authenticated operations.
+
+```bash
+uv run browser.py tiktok-login --account <name> [options]
+```
+
+**Options:**
+- `--account, -a` - Account name to save session as (required)
+- `--wait, -w` - Seconds to wait for login (default: 120)
+
+**Example:**
+```bash
+# Basic login
+uv run browser.py tiktok-login -a mytiktok
+
+# Extended wait time for complex login (2FA, etc.)
+uv run browser.py tiktok-login -a mytiktok -w 180
+```
+
+### `tiktok-search` - Search TikTok Videos
+
+Search TikTok videos by keyword or hashtag.
+
+```bash
+uv run browser.py tiktok-search <keyword> [options]
+```
+
+**Arguments:**
+- `keyword` - Search keyword or hashtag (e.g., `"funny cats"` or `"#dance"`)
+
+**Options:**
+- `--num, -n` - Number of results to return (default: 10)
+- `--output, -o` - JSON output path for results
+- `--account, -a` - Account name for authenticated search
+- `--no-headless` - Show browser window (**recommended** for TikTok)
+
+**Examples:**
+```bash
+# Basic search (use --no-headless for best results)
+uv run browser.py tiktok-search "funny cats" -n 10 --no-headless
+
+# Search by hashtag
+uv run browser.py tiktok-search "#dance" -n 5 --no-headless
+
+# Search with saved account (better results)
+uv run browser.py tiktok-search "cooking" -n 10 -a mytiktok --no-headless
+
+# Save results to JSON
+uv run browser.py tiktok-search "music" -n 20 -o results.json --no-headless
+```
+
+**Output Format:**
+```json
+[
+  {
+    "url": "https://www.tiktok.com/@user/video/123456789",
+    "title": "Video description...",
+    "author": "username",
+    "views": "1.2M",
+    "likes": "50K",
+    "date": "2d ago"
+  }
+]
+```
+
+### `tiktok-download` - Download TikTok Videos
+
+Download TikTok videos using yt-dlp.
+
+```bash
+uv run browser.py tiktok-download <url> [options]
+```
+
+**Arguments:**
+- `url` - TikTok video URL or search query (with `--search`)
+
+**Options:**
+- `--output-dir, -o` - Directory to save videos (default: `~/Downloads`)
+- `--search, -s` - Treat input as search query instead of URL
+- `--num, -n` - Number of videos to download with `--search` (default: 5)
+- `--account, -a` - Account name for authenticated operations
+- `--parallel, -p` - Number of parallel downloads (default: 3)
+- `--no-headless` - Show browser window for search
+
+**Examples:**
+```bash
+# Download single video by URL
+uv run browser.py tiktok-download "https://www.tiktok.com/@user/video/123456789" -o ~/Downloads
+
+# Search and download videos
+uv run browser.py tiktok-download "funny cats" --search -n 5 -o ~/Downloads --no-headless
+
+# Search by hashtag and download
+uv run browser.py tiktok-download "#cooking" --search -n 10 -o ~/Downloads --no-headless
+
+# With parallel downloads
+uv run browser.py tiktok-download "dance" --search -n 10 -o ~/Downloads -p 3 --no-headless
+
+# With saved account
+uv run browser.py tiktok-download "music" --search -n 5 -a mytiktok -o ~/Downloads --no-headless
+```
 
 ---
 

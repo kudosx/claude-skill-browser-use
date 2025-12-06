@@ -139,13 +139,13 @@ cmd = [
 
 ```bash
 # Direct download (uses yt-dlp)
-uv run browser.py tiktok-download "https://tiktok.com/@user/video/123" -o ./downloads
+uv run browser.py tiktok-download "https://tiktok.com/@user/video/123" -o ~/Downloads
 
 # Search + download
-uv run browser.py tiktok-download "keyword" --search -n 5 -o ./downloads --no-headless
+uv run browser.py tiktok-download "keyword" --search -n 5 -o ~/Downloads --no-headless
 
 # With parallel workers
-uv run browser.py tiktok-download "#funny" --search -n 10 -o ./downloads -p 3 --no-headless
+uv run browser.py tiktok-download "#funny" --search -n 10 -o ~/Downloads -p 3 --no-headless
 ```
 
 ---
@@ -196,7 +196,7 @@ page.goto("https://www.tiktok.com/login")
 uv run browser.py tiktok-search "keyword" -n 10 -a mytiktok --no-headless
 
 # Download with account
-uv run browser.py tiktok-download "keyword" --search -n 5 -a mytiktok -o ./downloads --no-headless
+uv run browser.py tiktok-download "keyword" --search -n 5 -a mytiktok -o ~/Downloads --no-headless
 ```
 
 ---
@@ -356,9 +356,9 @@ uv run browser.py tiktok-search "#hashtag" -n 5 --no-headless
 uv run browser.py tiktok-search "keyword" -n 10 -a mytiktok --no-headless
 
 # Download videos
-uv run browser.py tiktok-download "URL" -o ./downloads
-uv run browser.py tiktok-download "keyword" --search -n 5 -o ./downloads --no-headless
-uv run browser.py tiktok-download "#funny" --search -n 10 -o ./downloads -p 3 --no-headless
+uv run browser.py tiktok-download "URL" -o ~/Downloads
+uv run browser.py tiktok-download "keyword" --search -n 5 -o ~/Downloads --no-headless
+uv run browser.py tiktok-download "#funny" --search -n 10 -o ~/Downloads -p 3 --no-headless
 
 # View saved accounts
 uv run browser.py accounts
