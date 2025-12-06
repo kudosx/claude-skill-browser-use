@@ -1,6 +1,6 @@
 ---
 name: browser-use
-description: Browse and interact with websites using Playwright. Use when the user asks to visit a URL, scrape web content, take screenshots, fill forms, click buttons, or automate browser interactions.
+description: Web scraping, screenshots, form filling, file downloads/uploads, Google/DuckDuckGo image search, YouTube video downloading, and TikTok video downloading.
 allowed-tools: Bash, Read, Write, Edit
 ---
 
