@@ -18,8 +18,12 @@ uv run browser.py <command> [options]
 ### Common Commands
 
 ```bash
-# Navigation and screenshots
-uv run browser.py goto https://example.com
+# Manual browsing (opens browser for user interaction)
+uv run browser.py open https://example.com --wait 60
+uv run browser.py open https://example.com --account myaccount
+
+# Navigation and screenshots (headless automation)
+uv run browser.py auto https://example.com
 uv run browser.py screenshot https://example.com -o page.png
 
 # Form interaction
@@ -81,7 +85,7 @@ uv run browser.py tiktok-download "#funny" --search -n 10 -o ~/Downloads -p 3 --
 - `add_to_parser()` - Auto-generates argparse from dataclass fields
 - `from_args()` - Creates instance from parsed args
 
-**Authentication**: Uses Chrome persistent profiles stored in `.auth/profiles/<account>/` with stealth flags to bypass automation detection. Commands accept `--account` to use saved sessions.
+**Authentication**: Uses Chrome persistent profiles stored in `~/.auth/profiles/<account>/` (user home directory) with stealth flags to bypass automation detection. Commands accept `--account` to use saved sessions. Auth is shared across all projects.
 
 **Browser Context Pattern**: Most functions in `browser.py` follow this pattern:
 ```python

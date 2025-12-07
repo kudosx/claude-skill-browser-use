@@ -31,8 +31,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Default auth directory relative to project root
-AUTH_DIR = Path(__file__).parent.parent.parent.parent.parent / ".auth"
+# Default auth directory in user's home folder
+AUTH_DIR = Path.home() / ".auth"
 
 
 def get_auth_file(account: str) -> Path:
@@ -54,6 +54,32 @@ def ensure_auth_dir() -> None:
                 f.write(f"\n{gitignore_entry}\n")
     else:
         gitignore.write_text(f"{gitignore_entry}\n")
+
+
+def create_session_dir(output_dir: str | None = None) -> Path:
+    """Create a new session directory with timestamp.
+
+    Args:
+        output_dir: Base directory for sessions. Defaults to ./sessions in current directory.
+    """
+    from datetime import datetime
+    base_dir = Path(output_dir).expanduser() if output_dir else Path.cwd() / "sessions"
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    session_dir = base_dir / timestamp
+    session_dir.mkdir(parents=True, exist_ok=True)
+    return session_dir
+
+
+def setup_session_logger(session_dir: Path) -> logging.FileHandler:
+    """Setup a file handler for session-specific logging."""
+    log_file = session_dir / "session.log"
+    handler = logging.FileHandler(log_file)
+    handler.setFormatter(logging.Formatter(
+        "%(asctime)s - %(levelname)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S"
+    ))
+    logger.addHandler(handler)
+    return handler
 
 
 def wait_for_page_load(page: Page, timeout: int = 10000, extra_wait: float = 0) -> None:
@@ -176,24 +202,51 @@ def create_login(url: str, account: str, wait_seconds: int = 120, channel: str |
         logger.info("Please login manually. Session will be saved in %d seconds...", wait_seconds)
         logger.info("(Or close the browser tab when done)")
 
-        # Wait for either timeout or page close
+        # Wait for either timeout or browser close
         elapsed = 0
-        while elapsed < wait_seconds and not page.is_closed():
-            time.sleep(1)
+        browser_closed_early = False
+        while elapsed < wait_seconds:
+            try:
+                # wait_for_timeout keeps connection alive and properly detects browser close
+                # unlike page.evaluate() which fails on page redirects
+                page.wait_for_timeout(1000)
+            except Exception as e:
+                error_msg = str(e).lower()
+                if "target closed" in error_msg or "browser" in error_msg or "closed" in error_msg:
+                    logger.info("Browser closed by user")
+                    browser_closed_early = True
+                    break
+                # Other errors (navigation, etc.) - continue waiting
+
             elapsed += 1
             remaining = wait_seconds - elapsed
             if remaining > 0 and remaining % 30 == 0:
                 logger.info("  %d seconds remaining...", remaining)
 
         # Save storage state (cookies, localStorage, etc.)
-        if not context.pages:
-            # If all pages closed, we can't save - reopen briefly
-            logger.info("Browser closed. Attempting to save session...")
+        # With persistent context, profile data is auto-saved to user_data_dir
+        # We also save a JSON file for listing accounts
+        if browser_closed_early:
+            # Browser closed - profile already saved in user_data_dir
+            logger.info("Profile saved to: %s", user_data_dir)
+            # Create marker file for account listing
+            if not auth_file.exists():
+                auth_file.write_text('{"cookies":[],"origins":[]}')
         else:
-            context.storage_state(path=str(auth_file))
-            logger.info("Authentication saved to: %s", auth_file)
+            try:
+                context.storage_state(path=str(auth_file))
+                logger.info("Authentication saved to: %s", auth_file)
+            except Exception:
+                logger.info("Profile saved to: %s", user_data_dir)
+                if not auth_file.exists():
+                    auth_file.write_text('{"cookies":[],"origins":[]}')
+            # Clean up context
+            try:
+                context.close()
+            except Exception:
+                pass
 
-        context.close()
+        logger.info("Account '%s' created successfully!", account)
 
 
 def list_accounts() -> list[str]:
@@ -203,8 +256,142 @@ def list_accounts() -> list[str]:
     return [f.stem for f in AUTH_DIR.glob("*.json")]
 
 
-def goto(url: str, headless: bool = True, screenshot: str | None = None, wait: float = 0, account: str | None = None, channel: str | None = None) -> str:
-    """Navigate to a URL and return page content."""
+def open_browser(url: str, account: str | None = None, wait_seconds: int = 60, channel: str | None = "chrome", record: bool = False, output_dir: str | None = None) -> None:
+    """Open browser for manual browsing. Waits for user to close browser or timeout."""
+    session_dir = None
+    session_handler = None
+
+    if record:
+        session_dir = create_session_dir(output_dir)
+        session_handler = setup_session_logger(session_dir)
+        logger.info("Session recording started: %s", session_dir)
+        logger.info("URL: %s", url)
+        logger.info("Account: %s", account or "none")
+
+    browser_closed_early = False
+    with sync_playwright() as p:
+        if account:
+            user_data_dir = get_playwright_user_data_dir(account)
+            if not user_data_dir.exists():
+                logger.warning("Account '%s' not found. Run 'create-login' first.", account)
+                return
+            context = p.chromium.launch_persistent_context(
+                str(user_data_dir),
+                headless=False,
+                channel=channel,
+                no_viewport=True,
+                args=[
+                    "--disable-infobars",
+                    "--start-maximized",
+                    "--disable-blink-features=AutomationControlled",
+                ],
+                ignore_default_args=["--enable-automation"],
+            )
+            page = context.pages[0] if context.pages else context.new_page()
+        else:
+            browser = p.chromium.launch(headless=False, channel=channel)
+            context = browser.new_context()
+            page = context.new_page()
+
+        # Start tracing if recording
+        if record and session_dir:
+            context.tracing.start(screenshots=True, snapshots=True)
+
+        page.goto(url)
+        logger.info("Browser opened at: %s", url)
+        logger.info("Close browser when done (timeout: %ds)", wait_seconds)
+
+        # Wait for browser close or timeout
+        elapsed = 0
+        screenshot_count = 0
+        last_screenshot_time = 0
+        screenshot_interval = 2  # Take screenshot every 2 seconds
+
+        while elapsed < wait_seconds:
+            try:
+                # wait_for_timeout keeps connection alive and will throw if browser closes
+                page.wait_for_timeout(500)
+                elapsed += 0.5
+
+                # Take periodic screenshots if recording
+                if record and session_dir and (elapsed - last_screenshot_time) >= screenshot_interval:
+                    try:
+                        screenshot_count += 1
+                        screenshot_path = session_dir / f"screenshot_{screenshot_count:03d}.png"
+                        page.screenshot(path=str(screenshot_path))
+                        logger.info("Screenshot saved: %s", screenshot_path.name)
+                        last_screenshot_time = elapsed
+                    except Exception as e:
+                        # Ignore screenshot errors during navigation
+                        pass
+
+            except Exception as e:
+                error_msg = str(e).lower()
+                if "target closed" in error_msg or "browser" in error_msg or "closed" in error_msg:
+                    logger.info("Browser closed by user")
+                    browser_closed_early = True
+                    break
+                # Other errors (navigation, etc.) - continue waiting
+                elapsed += 0.5
+
+        logger.info("Browser session ended.")
+
+        # Save final recording if enabled and browser not closed early
+        if record and session_dir and not browser_closed_early:
+            try:
+                # Take final screenshot
+                screenshot_count += 1
+                screenshot_path = session_dir / f"screenshot_{screenshot_count:03d}_final.png"
+                page.screenshot(path=str(screenshot_path), full_page=True)
+                logger.info("Final screenshot saved: %s", screenshot_path.name)
+
+                # Stop and save trace
+                trace_path = session_dir / "trace.zip"
+                context.tracing.stop(path=str(trace_path))
+                logger.info("Trace saved: %s", trace_path)
+            except Exception as e:
+                logger.warning("Failed to save recording: %s", e)
+
+        # Clean up
+        try:
+            context.close()
+        except Exception:
+            pass
+
+    # Clean up session logger
+    if session_handler:
+        logger.removeHandler(session_handler)
+        session_handler.close()
+        logger.info("Session recording saved to: %s", session_dir)
+
+
+def goto(url: str, headless: bool = True, screenshot: str | None = None, wait: float = 0, account: str | None = None, channel: str | None = None, record: bool = False, output_dir: str | None = None) -> str:
+    """Navigate to a URL and return page content.
+
+    Args:
+        url: URL to navigate to.
+        headless: Run in headless mode.
+        screenshot: Path to save screenshot (optional).
+        wait: Extra wait time after page load.
+        account: Account name to use for authentication.
+        channel: Browser channel (chrome, msedge, chromium).
+        record: Enable session recording (trace, logs, screenshot).
+        output_dir: Directory to save session recording (default: ./sessions).
+
+    Returns:
+        Page HTML content.
+    """
+    session_dir = None
+    session_handler = None
+
+    # Setup session recording
+    if record:
+        session_dir = create_session_dir(output_dir)
+        session_handler = setup_session_logger(session_dir)
+        logger.info("Session recording started: %s", session_dir)
+        logger.info("URL: %s", url)
+        logger.info("Account: %s", account or "none")
+
     with sync_playwright() as p:
         if account:
             # Use persistent context with saved profile
@@ -212,6 +399,7 @@ def goto(url: str, headless: bool = True, screenshot: str | None = None, wait: f
             if not user_data_dir.exists():
                 logger.warning("Account '%s' not found. Run 'create-login' first.", account)
                 return ""
+
             context = p.chromium.launch_persistent_context(
                 str(user_data_dir),
                 headless=headless,
@@ -222,19 +410,59 @@ def goto(url: str, headless: bool = True, screenshot: str | None = None, wait: f
             )
             page = context.pages[0] if context.pages else context.new_page()
         else:
-            browser = p.chromium.launch(headless=headless, channel=channel)
+            browser = p.chromium.launch(headless=headless, channel=channel or "chrome")
             context = browser.new_context(viewport={"width": 1920, "height": 1080})
             page = context.new_page()
 
+        # Start tracing if recording
+        if record and session_dir:
+            context.tracing.start(screenshots=True, snapshots=True)
+            logger.info("Tracing started")
+
         page.goto(url)
+        logger.info("Page loaded: %s", url)
         wait_for_page_load(page, extra_wait=wait)
 
+        # Save screenshot
         if screenshot:
             page.screenshot(path=screenshot, full_page=True)
             logger.info("Screenshot saved to: %s", screenshot)
 
+        # Session recording artifacts
+        if record and session_dir:
+            # Final screenshot
+            screenshot_path = session_dir / "final.png"
+            page.screenshot(path=str(screenshot_path), full_page=True)
+            logger.info("Final screenshot saved: %s", screenshot_path)
+
+            # Save HTML
+            html_path = session_dir / "page.html"
+            html_path.write_text(page.content())
+            logger.info("HTML saved: %s", html_path)
+
+            # Stop tracing
+            trace_path = session_dir / "trace.zip"
+            context.tracing.stop(path=str(trace_path))
+            logger.info("Trace saved: %s", trace_path)
+
         content = page.content()
         context.close()
+
+        # Cleanup session logger
+        if session_handler:
+            logger.info("Session recording complete: %s", session_dir)
+            logger.removeHandler(session_handler)
+            session_handler.close()
+
+        # Print session directory for user
+        if record and session_dir:
+            print(f"\nSession recorded to: {session_dir}")
+            print(f"  - session.log (logs)")
+            print(f"  - final.png (screenshot)")
+            print(f"  - page.html (HTML content)")
+            print(f"  - trace.zip (Playwright trace)")
+            print(f"\nView trace: npx playwright show-trace {session_dir}/trace.zip")
+
         return content
 
 
@@ -986,13 +1214,24 @@ def main():
     # accounts command
     subparsers.add_parser("accounts", help="List saved accounts")
 
-    # goto command
-    goto_parser = subparsers.add_parser("goto", help="Navigate to a URL")
-    goto_parser.add_argument("url", help="URL to navigate to")
-    goto_parser.add_argument("--screenshot", "-s", help="Save screenshot to file")
-    goto_parser.add_argument("--no-headless", action="store_true", help="Show browser window")
-    goto_parser.add_argument("--wait", "-w", type=float, default=0, help="Extra wait time in seconds after page load")
-    goto_parser.add_argument("--account", "-a", help="Use saved account for authentication")
+    # open command (manual browsing)
+    open_parser = subparsers.add_parser("open", help="Open browser for manual browsing")
+    open_parser.add_argument("url", help="URL to open")
+    open_parser.add_argument("--account", "-a", help="Use saved account for authentication")
+    open_parser.add_argument("--wait", "-w", type=int, default=60, help="Timeout in seconds (default: 60)")
+    open_parser.add_argument("--channel", "-c", default="chrome", help="Browser channel: chrome, msedge, chromium")
+    open_parser.add_argument("--record", "-r", action="store_true", help="Record session (trace, screenshot)")
+    open_parser.add_argument("--output-dir", "-o", help="Directory to save session recording")
+
+    # auto command (automation)
+    auto_parser = subparsers.add_parser("auto", help="Navigate to URL and return content (automation)")
+    auto_parser.add_argument("url", help="URL to navigate to")
+    auto_parser.add_argument("--screenshot", "-s", help="Save screenshot to file")
+    auto_parser.add_argument("--no-headless", action="store_true", help="Show browser window")
+    auto_parser.add_argument("--wait", "-w", type=float, default=0, help="Extra wait time in seconds after page load")
+    auto_parser.add_argument("--account", "-a", help="Use saved account for authentication")
+    auto_parser.add_argument("--record", "-r", action="store_true", help="Record session (trace, logs, screenshot)")
+    auto_parser.add_argument("--output-dir", "-o", help="Directory to save session recording (default: ./sessions)")
 
     # screenshot command
     screenshot_parser = subparsers.add_parser("screenshot", help="Take a screenshot")
@@ -1117,9 +1356,13 @@ def main():
                 logger.info("  - %s", acc)
         else:
             logger.info("No saved accounts. Use 'create-login' to save one.")
-    elif args.command == "goto":
-        content = goto(args.url, headless=not args.no_headless, screenshot=args.screenshot, wait=args.wait, account=args.account)
-        print(content[:2000] if len(content) > 2000 else content)
+    elif args.command == "open":
+        channel = args.channel if args.channel != "chromium" else None
+        open_browser(args.url, args.account, args.wait, channel, record=args.record, output_dir=args.output_dir)
+    elif args.command == "auto":
+        content = goto(args.url, headless=not args.no_headless, screenshot=args.screenshot, wait=args.wait, account=args.account, record=args.record, output_dir=args.output_dir)
+        if not args.record:  # Only print content if not recording (recording prints session info)
+            print(content[:2000] if len(content) > 2000 else content)
     elif args.command == "screenshot":
         screenshot(args.url, args.output, full_page=not args.no_full_page, wait=args.wait, account=args.account)
     elif args.command == "text":

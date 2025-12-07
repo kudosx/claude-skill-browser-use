@@ -16,8 +16,15 @@ This skill enables browsing websites and interacting with web pages using Playwr
 ```bash
 cd .claude/skills/browser-use/scripts
 
+# === MANUAL BROWSING (opens browser for user interaction) ===
+# Open browser for manual use (waits for user to close)
+uv run browser.py open https://example.com --wait 60
+uv run browser.py open https://example.com --account myaccount --wait 120
+
+# === AUTOMATION (headless, returns content) ===
 # Navigate to a URL and get content
-uv run browser.py goto https://example.com
+uv run browser.py auto https://example.com
+uv run browser.py auto https://example.com --account myaccount
 
 # Take a screenshot
 uv run browser.py screenshot https://example.com -o screenshot.png
@@ -213,7 +220,7 @@ Save and reuse login sessions across browser commands. Uses Chrome with stealth 
 cd .claude/skills/browser-use/scripts
 
 # Step 1: Create a login session (opens Chrome for manual login)
-# Browser will open maximized - login manually then close the browser
+# Browser will open maximized - login manually then CLOSE THE BROWSER when done
 uv run browser.py create-login https://gemini.google.com/app --account myaccount
 
 # Options:
@@ -223,12 +230,26 @@ uv run browser.py create-login https://gemini.google.com/app --account myaccount
 # Step 2: List saved accounts
 uv run browser.py accounts
 
-# Step 3: Use saved account with any command
-uv run browser.py goto https://gemini.google.com/app --account myaccount
+# Step 3: Use saved account with commands
+# Manual browsing (opens browser for user interaction)
+uv run browser.py open https://gemini.google.com/app --account myaccount
+
+# Automation (headless, returns content)
+uv run browser.py auto https://gemini.google.com/app --account myaccount
 uv run browser.py screenshot https://gemini.google.com/app -o gemini.png --account myaccount
 ```
 
-Authentication is stored in `.auth/profiles/` directory (browser profile) and `.auth/*.json` (cookies). Both are automatically added to .gitignore.
+### Storage Location
+
+Authentication is stored in user's home directory `~/.auth/`:
+```
+~/.auth/
+├── account-name.json          # Storage state (cookies, localStorage)
+└── profiles/
+    └── account-name/          # Persistent browser profile
+```
+
+This location is shared across all projects and not committed to git.
 
 
 ### Best Practices

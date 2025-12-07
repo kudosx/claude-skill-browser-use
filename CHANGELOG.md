@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.1.1 - 2025-12-08
+
+### Added
+- New `open` command for manual browser interaction with wait timeout
+- Session recording feature (`--record` flag) with screenshots and traces
+- New reference documentation: authentication-sessions, browser-manual, web-scraping
+
+### Changed
+- Renamed `goto` command to `auto` for clarity (automated/headless browsing)
+- Auth directory moved to `~/.auth/` (user home) for sharing across projects
+- Improved browser close detection in `create-login` command
+
 ## 0.1.0 - 2025-12-06
 
 ### Added

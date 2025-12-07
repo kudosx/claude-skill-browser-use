@@ -4,9 +4,10 @@ Claude skill for browser automation, web scraping, and media downloading.
 
 ## Features
 
-- Browser automation with Chrome/Edge support
-- Authentication persistence (bypass automation detection)
-- Screenshot, PDF export, text extraction
+- **Manual browsing** - Open browser for user interaction with `open` command
+- **Headless automation** - Screenshot, PDF export, text extraction with `auto` command
+- Authentication persistence (shared across projects in `~/.auth/`)
+- Session recording with screenshots and traces
 - Form filling, clicking, file upload/download
 - **Image search & download** - DuckDuckGo (no browser, 12x faster) + Google fallback
 - **YouTube search & download** - yt-dlp powered (no browser, 4x faster search) with date filtering
@@ -75,7 +76,10 @@ Note: TikTok requires `--no-headless` mode due to bot detection.
 
 ### Tips & Best Practices
 
+- [Authentication & Sessions](.claude/skills/browser-use/references/tips/authentication-sessions.md) - Login persistence, shared auth
+- [Browser Manual](.claude/skills/browser-use/references/tips/browser-manual.md) - Manual browsing with `open` command
+- [Web Scraping](.claude/skills/browser-use/references/tips/web-scraping.md) - Data extraction patterns
+- [Browser Automation](.claude/skills/browser-use/references/tips/browser-automation.md) - When to avoid browsers
 - [Google Images Optimization](.claude/skills/browser-use/references/tips/google-images-optimization.md) - DuckDuckGo + parallel downloads (12x faster)
 - [YouTube Optimization](.claude/skills/browser-use/references/tips/youtube-optimization.md) - yt-dlp ytsearch (4x faster)
 - [TikTok Optimization](.claude/skills/browser-use/references/tips/tiktok-optimization.md) - Anti-detection and best practices
-- [Browser Automation Best Practices](.claude/skills/browser-use/references/tips/browser-automation.md) - When to avoid browsers

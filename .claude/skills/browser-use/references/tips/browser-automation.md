@@ -1,119 +1,42 @@
 ---
-title: "Web Automation Best Practices: Speed, Reliability & Scale"
+title: "Browser Automation: Patterns & Best Practices"
 author: Kudosx Team
-date: 2025-12-05
-tags: [automation, scraping, optimization, yt-dlp, playwright, requests, best-practices]
+date: 2025-12-07
+tags: [automation, playwright, reliability, anti-detection, best-practices]
 ---
 
-# Web Automation Best Practices
+# Browser Automation: Patterns & Best Practices
 
-## The Golden Rule
+## Overview
 
-**The fastest automation is no browser at all.**
+This guide covers browser automation patterns using Playwright - when to use browsers, architecture patterns, reliability, and anti-detection techniques.
 
-Before writing any code, ask: What's the simplest tool for this job?
-
-```
-Speed & Reliability Hierarchy:
-
-1. Official APIs        (~100ms)  - Best: rate limits, stable, documented
-2. CLI Tools            (~1-2s)   - yt-dlp, curl, wget - battle-tested
-3. HTTP + Regex/JSON    (~1-3s)   - requests + parsing, no JS needed
-4. Headless Browser     (~5-10s)  - Playwright, Puppeteer, Selenium
-5. Headed Browser       (~10-20s) - Visible browser, debugging only
-```
+For web scraping and data extraction, see [web-scraping.md](./web-scraping.md).
 
 ---
 
-## Tool Selection Guide
+## When to Use Browser Automation
 
-### When to Use What
+### Browser Required
 
-| Task | Best Tool | Why |
-|------|-----------|-----|
-| YouTube search/download | `yt-dlp` | Purpose-built, handles all edge cases |
-| Image search | `duckduckgo-search` | No browser, no API key, ~2s for 100 images |
-| TikTok download | `yt-dlp` + cookies | Direct download, handles watermarks |
-| TikTok search | Playwright (headful) | Headless is blocked by TikTok |
-| API with JSON response | `requests` | Simple, fast, no overhead |
-| Static HTML scraping | `requests` + `BeautifulSoup` | No JS needed |
-| JS-rendered content | Playwright/Puppeteer | Need browser engine |
-| Form with CSRF/cookies | `requests.Session` | Maintains state |
-| Complex login flows | Playwright + persistent profile | Handles OAuth, CAPTCHA |
-| File downloads | `aria2c`, `wget`, `curl` | Optimized for downloads |
-| Image galleries | `requests` + threading | Parallel HTTP requests |
+| Scenario | Why Browser Needed |
+|----------|-------------------|
+| OAuth login flows | Complex redirects, popups |
+| CAPTCHA handling | Need visual interaction |
+| Heavy JS frameworks | React/Vue SPAs need rendering |
+| WebSocket connections | Real-time data |
+| Cookie consent dialogs | DOM interaction required |
+| Anti-bot protected sites | TikTok, Instagram |
 
-### Real Example: YouTube Search
+### Browser NOT Needed
 
-```python
-# SLOWEST: Selenium (~15-20s)
-driver = webdriver.Chrome()
-driver.get(f"https://youtube.com/results?search_query={keyword}")
-# ... wait, scroll, parse DOM
-
-# SLOW: Playwright (~6-10s)
-page.goto(f"https://youtube.com/results?search_query={keyword}")
-# ... wait for JS, extract data
-
-# FAST: youtube-search-python (~2-3s)
-from youtubesearchpython import VideosSearch
-search = VideosSearch(keyword, limit=10)
-results = search.result()
-
-# FASTEST: yt-dlp CLI (~1.5s)
-cmd = ["yt-dlp", f"ytsearch{num}:{keyword}", "--dump-json", "--flat-playlist"]
-result = subprocess.run(cmd, capture_output=True, text=True)
-```
-
-**Lesson:** yt-dlp already solved YouTube scraping. Don't reinvent the wheel.
-
-### Real Example: Image Search
-
-```python
-# SLOWEST: Click thumbnails (~110s for 20 images)
-for thumb in page.locator("img[data-src]").all():
-    thumb.click()
-    # ... wait for full image, extract URL
-
-# SLOW: Playwright + regex (~15s for 100 images)
-page.goto(f"https://google.com/search?q={keyword}&tbm=isch")
-html = page.content()
-urls = re.findall(r'\["(https?://[^"]+)",\s*\d+,\s*\d+\]', html)
-
-# FASTEST: DuckDuckGo library (~2-3s for 100 images, NO BROWSER)
-from duckduckgo_search import DDGS
-
-with DDGS() as ddgs:
-    results = list(ddgs.images(keywords=keyword, max_results=100))
-    urls = [r["image"] for r in results]
-```
-
-**Lesson:** DuckDuckGo provides free image search API. No browser, no API key needed.
-
-### Real Example: TikTok Search & Download
-
-```python
-# WILL NOT WORK: Headless mode (TikTok blocks it)
-browser = p.chromium.launch(headless=True)  # BLOCKED!
-page.goto("https://tiktok.com/search?q=...")
-# Error: Captcha detected or page blocked
-
-# WORKS: Headful mode with stealth flags
-browser = p.chromium.launch(
-    headless=False,  # REQUIRED for TikTok
-    args=[
-        "--disable-blink-features=AutomationControlled",
-        "--disable-dev-shm-usage",
-        "--no-sandbox",
-    ]
-)
-
-# FASTEST: yt-dlp for downloads (~2-3s per video)
-cmd = ["yt-dlp", "--cookies-from-browser", "chrome", url]
-result = subprocess.run(cmd, capture_output=True)
-```
-
-**Lesson:** TikTok uses aggressive bot detection with a custom JS VM. Headless browsers are immediately blocked. Always use headful mode with stealth flags, and prefer yt-dlp with cookies for downloads.
+| Scenario | Better Alternative |
+|----------|-------------------|
+| YouTube search/download | `yt-dlp` CLI |
+| Image search | `duckduckgo-search` library |
+| Static HTML | `requests` + `BeautifulSoup` |
+| JSON APIs | `requests` directly |
+| File downloads | `curl`, `wget`, `aria2c` |
 
 ---
 
@@ -168,24 +91,20 @@ def download_parallel(urls: list[str], max_workers: int = 3) -> list[str]:
 ```
 
 **Worker Guidelines:**
-- Downloads: 3 workers (avoid rate limiting)
-- API calls: 5-10 workers
-- Image downloads: 10-20 workers (lightweight)
+| Task | Workers | Reason |
+|------|---------|--------|
+| Video downloads | 3 | Avoid rate limiting |
+| API calls | 5-10 | Balance speed/limits |
+| Image downloads | 10-20 | Lightweight requests |
 
-### 3. When Browser IS Needed
+### 3. Browser Automation Pattern
 
-Sometimes only a browser will work:
+Standard pattern for Playwright automation:
 
 ```python
-# Complex scenarios requiring browser:
-# - OAuth login flows
-# - CAPTCHA solving
-# - Heavy JS frameworks (React SPAs)
-# - WebSocket connections
-# - Cookie consent dialogs
-# - TikTok (requires headful mode due to bot detection)
+from playwright.sync_api import sync_playwright
 
-def browser_automation_pattern(headless=True):
+def browser_automation(headless: bool = True):
     with sync_playwright() as p:
         browser = p.chromium.launch(
             headless=headless,
@@ -196,104 +115,45 @@ def browser_automation_pattern(headless=True):
         )
         context = browser.new_context(
             viewport={"width": 1920, "height": 1080},
-            user_agent="Mozilla/5.0 ...",
+            user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)...",
         )
         page = context.new_page()
 
         try:
-            yield page
+            # Your automation code here
+            page.goto("https://example.com")
+            # ...
         finally:
             context.close()
             browser.close()
 ```
 
-### 4. Platform-Specific Considerations
+### 4. Persistent Profile Pattern
 
-| Platform | Headless OK? | Key Requirement |
-|----------|--------------|-----------------|
-| YouTube | Yes | Use yt-dlp instead of browser |
-| Google Images | Yes | Regex extraction from HTML |
-| DuckDuckGo | N/A | No browser needed (HTTP API) |
-| TikTok | **NO** | Must use headful + stealth flags |
-| Instagram | No | Requires login + anti-detection |
-| Twitter/X | Partial | API preferred, browser for auth |
-
----
-
-## Performance Optimization
-
-### 1. Batch Operations
-
-**Problem:** Multiple API/DOM calls have overhead.
+For sites requiring login/session persistence:
 
 ```python
-# SLOW: 30 separate calls
-for item in page.locator(".item").all():
-    title = item.locator(".title").text_content()
-    price = item.locator(".price").text_content()
-
-# FAST: 1 JavaScript call
-data = page.evaluate("""
-    () => [...document.querySelectorAll('.item')].map(el => ({
-        title: el.querySelector('.title')?.textContent,
-        price: el.querySelector('.price')?.textContent,
-    }))
-""")
-```
-
-**Result:** 10-30x faster for DOM extraction.
-
-### 2. Skip What You Don't Need
-
-```python
-# Block images, fonts, CSS when only scraping text
-async def route_handler(route):
-    if route.request.resource_type in ["image", "font", "stylesheet"]:
-        await route.abort()
-    else:
-        await route.continue_()
-
-await page.route("**/*", route_handler)
-```
-
-### 3. Download Optimization
-
-For yt-dlp and similar tools:
-
-```bash
-# Optimized yt-dlp settings
-yt-dlp \
-  -N 8 \                    # 8 concurrent fragment downloads
-  --buffer-size 64K \       # Larger buffer
-  --http-chunk-size 10M \   # Reduce request overhead
-  --no-mtime \              # Skip file time modification
-  "$URL"
-```
-
-**Important:** aria2c is NOT faster for YouTube/DASH streams:
-- YouTube uses separate video + audio streams
-- Native yt-dlp handles merging better
-- aria2c is only faster for direct HTTP downloads
-
-### 4. Caching
-
-Don't re-fetch what you already have:
-
-```python
-import hashlib
 from pathlib import Path
 
-def cached_fetch(url: str, cache_dir: Path = Path(".cache")) -> str:
-    cache_dir.mkdir(exist_ok=True)
-    cache_key = hashlib.md5(url.encode()).hexdigest()
-    cache_file = cache_dir / f"{cache_key}.json"
+AUTH_DIR = Path.home() / ".auth"
 
-    if cache_file.exists():
-        return cache_file.read_text()
+def with_persistent_profile(account: str, headless: bool = True):
+    user_data_dir = AUTH_DIR / "profiles" / account
 
-    response = requests.get(url)
-    cache_file.write_text(response.text)
-    return response.text
+    with sync_playwright() as p:
+        context = p.chromium.launch_persistent_context(
+            str(user_data_dir),
+            headless=headless,
+            channel="chrome",
+            args=["--disable-blink-features=AutomationControlled"],
+            ignore_default_args=["--enable-automation"],
+        )
+        page = context.pages[0] if context.pages else context.new_page()
+
+        try:
+            yield page
+        finally:
+            context.close()
 ```
 
 ---
@@ -318,7 +178,7 @@ def retry_with_backoff(func, max_retries=3, base_delay=1.0):
             time.sleep(delay)
 ```
 
-### 2. Graceful Error Handling
+### 2. Safe Element Extraction
 
 ```python
 def safe_extract(extractor_func, default=None):
@@ -331,9 +191,23 @@ def safe_extract(extractor_func, default=None):
 
 # Usage
 title = safe_extract(lambda: page.locator("h1").text_content(), default="Unknown")
+price = safe_extract(lambda: page.locator(".price").text_content(), default="N/A")
 ```
 
-### 3. Handle Common Obstacles
+### 3. Wait for Dynamic Content
+
+```python
+# Wait for specific element
+page.wait_for_selector(".content-loaded", timeout=10000)
+
+# Wait for network idle
+page.wait_for_load_state("networkidle")
+
+# Custom wait condition
+page.wait_for_function("() => window.dataLoaded === true")
+```
+
+### 4. Handle Common Obstacles
 
 ```python
 def handle_cookie_consent(page):
@@ -354,27 +228,65 @@ def handle_cookie_consent(page):
         except:
             continue
     return False
+
+
+def handle_popup(page):
+    """Close common popups."""
+    close_selectors = [
+        "[aria-label='Close']",
+        "button.close",
+        ".modal-close",
+    ]
+    for selector in close_selectors:
+        try:
+            btn = page.locator(selector).first
+            if btn.is_visible(timeout=1000):
+                btn.click()
+                return True
+        except:
+            continue
+    return False
 ```
 
 ---
 
-## Anti-Detection (When Needed)
+## Anti-Detection Techniques
 
-### 1. Rotate User Agents
+### 1. Stealth Browser Launch
+
+```python
+context = p.chromium.launch_persistent_context(
+    user_data_dir,
+    headless=False,  # Some sites block headless
+    channel="chrome",  # Use real Chrome
+    args=[
+        "--disable-blink-features=AutomationControlled",
+        "--disable-infobars",
+        "--disable-dev-shm-usage",
+        "--no-sandbox",
+        "--start-maximized",
+    ],
+    ignore_default_args=["--enable-automation"],
+)
+```
+
+### 2. Rotate User Agents
 
 ```python
 import random
 
 USER_AGENTS = [
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36...",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36...",
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36...",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
 ]
 
-headers = {"User-Agent": random.choice(USER_AGENTS)}
+context = browser.new_context(
+    user_agent=random.choice(USER_AGENTS)
+)
 ```
 
-### 2. Add Human-like Delays
+### 3. Human-like Delays
 
 ```python
 import random
@@ -383,145 +295,104 @@ import time
 def human_delay(min_sec=0.5, max_sec=2.0):
     """Random delay to mimic human behavior."""
     time.sleep(random.uniform(min_sec, max_sec))
+
+def human_type(page, selector, text):
+    """Type with human-like delays between keystrokes."""
+    element = page.locator(selector)
+    for char in text:
+        element.type(char, delay=random.randint(50, 150))
 ```
 
-### 3. Use Persistent Profiles
+### 4. Platform-Specific Requirements
 
-For sites requiring login:
-
-```python
-# Save session across runs
-context = browser.launch_persistent_context(
-    user_data_dir="./profiles/account_name",
-    headless=True,
-)
-```
+| Platform | Headless OK? | Key Requirement |
+|----------|--------------|-----------------|
+| YouTube | Yes | Use yt-dlp instead |
+| Google | Yes | Rotate user agents |
+| TikTok | **NO** | Headful + stealth flags |
+| Instagram | **NO** | Login + anti-detection |
+| Twitter/X | Partial | API preferred |
+| LinkedIn | **NO** | Login + rate limiting |
 
 ---
 
-## CLI Tool Integration
+## Best Practices Checklist
 
-### duckduckgo-search (Image Search)
+### Before Starting
+- [ ] Check if API exists (fastest option)
+- [ ] Check if CLI tool exists (yt-dlp, curl)
+- [ ] Determine if browser is actually needed
 
-```bash
-# Install
-pip install duckduckgo-search
-# or
-uv add duckduckgo-search
-```
+### Implementation
+- [ ] Use persistent profiles for login-required sites
+- [ ] Implement tiered fallback strategy
+- [ ] Add retry logic with exponential backoff
+- [ ] Handle common obstacles (cookies, popups)
+- [ ] Use appropriate timeouts
 
-```python
-from duckduckgo_search import DDGS
+### Anti-Detection
+- [ ] Use stealth flags for sensitive sites
+- [ ] Add human-like delays
+- [ ] Rotate user agents if needed
+- [ ] Check platform-specific requirements
 
-# Basic search
-with DDGS() as ddgs:
-    results = list(ddgs.images(
-        keywords="nature wallpaper",
-        max_results=100,
-    ))
-
-# With filters
-with DDGS() as ddgs:
-    results = list(ddgs.images(
-        keywords="landscape",
-        region="wt-wt",        # Worldwide
-        safesearch="off",
-        size="Large",          # Large, Medium, Small
-        max_results=50,
-    ))
-```
-
-### yt-dlp (Video/Audio)
-
-```bash
-# Search without downloading
-yt-dlp "ytsearch10:python tutorial" --dump-json --flat-playlist
-
-# Download with quality selection
-yt-dlp -f "bestvideo[height<=720]+bestaudio" --merge-output-format mp4 "$URL"
-
-# Audio only
-yt-dlp -x --audio-format mp3 "$URL"
-```
-
-### curl/wget (HTTP)
-
-```bash
-# Simple download
-curl -O "$URL"
-
-# With headers
-curl -H "Authorization: Bearer $TOKEN" "$URL"
-
-# Resume interrupted download
-wget -c "$URL"
-```
-
-### aria2c (Parallel Downloads)
-
-```bash
-# Multi-connection download (for direct HTTP, NOT for YouTube)
-aria2c -x 16 -s 16 "$URL"
-
-# Download from file list
-aria2c -i urls.txt -j 5
-```
+### Reliability
+- [ ] Log actions for debugging
+- [ ] Handle errors gracefully
+- [ ] Clean up resources (close browsers)
+- [ ] Respect rate limits
 
 ---
 
 ## Quick Reference
 
-### Speed Comparison
+### browser.py Commands
 
-| Method | YouTube Search | Image Search | Image Download | API Call |
-|--------|---------------|--------------|----------------|----------|
-| CLI (yt-dlp) | 1.5s | N/A | 0.5s | 0.3s |
-| DuckDuckGo lib | N/A | 2-3s | N/A | N/A |
-| Python requests | N/A | N/A | 1s | 0.5s |
-| Playwright headless | 6-10s | 15s | 3s | 2s |
-| Selenium | 10-15s | 20s+ | 5s | 3s |
+```bash
+cd .claude/skills/browser-use/scripts
 
-### Decision Tree
+# Manual browsing
+uv run browser.py open URL --account NAME --wait 60
 
-```
-Need to automate web task?
-│
-├─ Has official API? → Use API
-│
-├─ CLI tool exists? (yt-dlp, curl) → Use CLI
-│
-├─ Static HTML? → requests + BeautifulSoup
-│
-├─ Need JS rendering?
-│   ├─ TikTok/Instagram? → Playwright (HEADFUL + stealth)
-│   └─ Other sites? → Playwright (headless)
-│
-└─ Complex interaction? → Playwright + persistent profile
+# Create login session
+uv run browser.py create-login URL --account NAME
+
+# Automation (headless)
+uv run browser.py auto URL --account NAME
+
+# Other automation commands
+uv run browser.py screenshot URL -o file.png
+uv run browser.py click URL "selector"
+uv run browser.py fill URL "selector" "value"
 ```
 
-### Best Practices Checklist
+### Common Selectors
 
-- [ ] Use simplest tool possible (API > CLI > HTTP > Browser)
-- [ ] Implement tiered fallback strategy
-- [ ] Batch operations to reduce overhead
-- [ ] Add retry logic with backoff
-- [ ] Cache responses when appropriate
-- [ ] Respect rate limits
-- [ ] Handle errors gracefully
-- [ ] Log actions for debugging
-- [ ] Clean up resources (close browsers, sessions)
-- [ ] Check platform-specific requirements (headless vs headful)
-- [ ] Use stealth flags for anti-detection platforms (TikTok, Instagram)
+```python
+# By ID
+page.locator("#element-id")
+
+# By class
+page.locator(".class-name")
+
+# By text
+page.locator("text=Button Text")
+page.locator("button:has-text('Submit')")
+
+# By role
+page.locator("role=button[name='Submit']")
+
+# By CSS
+page.locator("div.container > p.content")
+
+# By XPath
+page.locator("xpath=//div[@class='item']")
+```
 
 ---
 
 ## References
 
-- [yt-dlp Documentation](https://github.com/yt-dlp/yt-dlp)
 - [Playwright Best Practices](https://playwright.dev/docs/best-practices)
-- [requests Documentation](https://docs.python-requests.org/)
-- [aria2 Manual](https://aria2.github.io/manual/en/html/)
-- [Web Scraping Best Practices 2025](https://www.scraperapi.com/blog/web-scraping-best-practices/)
-- [How to Scrape TikTok - ScrapingBee](https://www.scrapingbee.com/blog/how-to-scrape-tiktok/)
-- [TikTok Bot Detection Analysis - Castle.io](https://blog.castle.io/what-tiktoks-virtual-machine-tells-us-about-modern-bot-defenses/)
-- [PyTok - Playwright TikTok Scraper](https://github.com/networkdynamics/pytok)
+- [Playwright Selectors](https://playwright.dev/docs/selectors)
+- [Anti-Bot Detection Techniques](https://blog.castle.io/what-tiktoks-virtual-machine-tells-us-about-modern-bot-defenses/)
